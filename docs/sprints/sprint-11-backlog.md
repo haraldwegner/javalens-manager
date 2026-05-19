@@ -18,7 +18,7 @@ End-of-sprint outcome:
 - javalens-mcp registers ~60 tools per service (66 → 55 from Phase D consolidation, then +5 from Phase E refactorings) — leaves ~40 slots in the agent's 100-tool budget for Ring 2+ work without future pressure.
 - Fork release `v1.5.0` published; manager-side single-workspace mode becomes the default.
 
-Reference plan: `~/.claude/plans/make-a-plan-happy-fern.md`. Predecessor: `docs/sprint-10-backlog.md` (multi-project workspace, shipped as v1.3.0).
+Reference plan: `~/.claude/plans/make-a-plan-happy-fern.md`. Predecessor: `docs/sprints/sprint-10-backlog.md` (multi-project workspace, shipped as v1.3.0).
 
 ## Problem Statement
 

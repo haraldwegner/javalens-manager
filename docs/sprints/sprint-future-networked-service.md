@@ -133,6 +133,6 @@ The local single-developer use case (`cp ~/.cache/javalens-manager/workspaces/X`
 
 ## Cross-references
 
-- Sprint 10 backlog (`docs/sprint-10-backlog.md`): port-as-workspace decision and the local file-watch model that this networked service would supersede if/when it ships.
-- Sprint 11 backlog (`docs/sprint-11-backlog.md`): "Independence posture" section, which this document strengthens.
+- Sprint 10 backlog (`docs/sprints/sprint-10-backlog.md`): port-as-workspace decision and the local file-watch model that this networked service would supersede if/when it ships.
+- Sprint 11 backlog (`docs/sprints/sprint-11-backlog.md`): "Independence posture" section, which this document strengthens.
 - ADR 0004 (`docs/adr/0004-helper-portability-constraint.md` in `javalens-mcp` fork): the portability constraint that survives any future transport change.

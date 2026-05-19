@@ -27,7 +27,7 @@ Reference plan: `~/.claude/plans/make-a-plan-happy-fern.md`.
 
 ### 0.0 Sprint setup
 
-- [ ] This file: `docs/sprint-9-backlog.md` (✅ created).
+- [ ] This file: `docs/sprints/sprint-9-backlog.md` (✅ created).
 - [ ] Fork repo seeded with `docs/architecture.md`, `docs/adr/0001-source-resolution-precedence.md`, `docs/adr/0004-helper-portability-constraint.md`. Each ADR ~½ page: Context / Decision / Consequences.
 
 ### 0.1 Fork on GitHub

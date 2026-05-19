@@ -29,10 +29,10 @@ See [`docs/release-notes/`](docs/release-notes/) for per-release detail.
 - [`docs/adr/README.md`](docs/adr/README.md) - accepted architecture decision records
 - [`docs/javalens-management.md`](docs/javalens-management.md) - how upstream `javalens-mcp` is imported, versioned, and managed
 - [`docs/javalens-runtime-contract.md`](docs/javalens-runtime-contract.md) - exact Sprint 1 launch, transport, health, and config contract
-- [`docs/sprint-1-backlog.md`](docs/sprint-1-backlog.md) - first runnable-slice backlog and acceptance criteria
-- [`docs/sprint-2-backlog.md`](docs/sprint-2-backlog.md) - managed-runtime upgrade backlog, team split, and acceptance criteria
-- [`docs/sprint-5-backlog.md`](docs/sprint-5-backlog.md) - paths, workspace override, and Dashboard vs Settings UX documentation
-- [`docs/sprint-6-backlog.md`](docs/sprint-6-backlog.md) - radical simplification and global configuration
+- [`docs/sprints/sprint-1-backlog.md`](docs/sprints/sprint-1-backlog.md) - first runnable-slice backlog and acceptance criteria
+- [`docs/sprints/sprint-2-backlog.md`](docs/sprints/sprint-2-backlog.md) - managed-runtime upgrade backlog, team split, and acceptance criteria
+- [`docs/sprints/sprint-5-backlog.md`](docs/sprints/sprint-5-backlog.md) - paths, workspace override, and Dashboard vs Settings UX documentation
+- [`docs/sprints/sprint-6-backlog.md`](docs/sprints/sprint-6-backlog.md) - radical simplification and global configuration
 - [`docs/tauri-bootstrap.md`](docs/tauri-bootstrap.md) - Sprint 0 and Sprint 1 bootstrap path for the Tauri app
 
 ## Installation

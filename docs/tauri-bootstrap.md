@@ -13,8 +13,8 @@ This guide is for Sprint 0 and Sprint 1. It is intentionally narrow so the repo 
 For the exact JavaLens runtime contract and the first task breakdown, also use:
 
 - [`docs/javalens-runtime-contract.md`](javalens-runtime-contract.md)
-- [`docs/sprint-1-backlog.md`](sprint-1-backlog.md)
-- [`docs/sprint-2-backlog.md`](sprint-2-backlog.md)
+- [`docs/sprints/sprint-1-backlog.md`](sprints/sprint-1-backlog.md)
+- [`docs/sprints/sprint-2-backlog.md`](sprints/sprint-2-backlog.md)
 
 ## Prerequisites
 
