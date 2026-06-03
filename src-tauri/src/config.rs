@@ -53,6 +53,14 @@ fn default_use_system_tray() -> bool {
     true
 }
 
+/// Sprint 14 (v0.14.0): manager does NOT auto-launch at login by
+/// default — the user opts in via Settings > "Autostart on boot" or
+/// the tray checkable. Avoids surprising power users who don't want a
+/// tray-resident process they didn't approve.
+fn default_autostart_on_boot() -> bool {
+    false
+}
+
 fn default_mcp_merge_mode() -> McpMergeMode {
     McpMergeMode::SafeMerge
 }
@@ -152,6 +160,12 @@ pub struct ManagerSettings {
     pub global_runtime_source: RuntimeSource,
     #[serde(default = "default_use_system_tray")]
     pub use_system_tray: bool,
+    /// Sprint 14 (v0.14.0): if true, the manager registers itself with
+    /// the OS so it auto-launches at session login (Linux:
+    /// ~/.config/autostart/*.desktop, macOS: LaunchAgent, Windows:
+    /// registry Run key). Surfaced in Settings AND as a tray checkable.
+    #[serde(default = "default_autostart_on_boot")]
+    pub autostart_on_boot: bool,
     #[serde(default = "default_mcp_client_paths")]
     pub mcp_client_paths: McpClientPaths,
     #[serde(default = "default_mcp_merge_mode")]
@@ -192,6 +206,7 @@ impl ManagerSettings {
             data_root: display_path(&paths.default_data_root),
             global_runtime_source: RuntimeSource::Managed,
             use_system_tray: default_use_system_tray(),
+            autostart_on_boot: default_autostart_on_boot(),
             mcp_client_paths: detect_default_mcp_client_paths(),
             mcp_merge_mode: default_mcp_merge_mode(),
             mcp_backup_before_write: default_mcp_backup_before_write(),
@@ -276,6 +291,7 @@ pub struct UpdateSettingsInput {
     pub data_root: String,
     pub global_runtime_source: RuntimeSource,
     pub use_system_tray: bool,
+    pub autostart_on_boot: bool,
     pub mcp_client_paths: McpClientPaths,
     pub mcp_merge_mode: McpMergeMode,
     pub mcp_backup_before_write: bool,
@@ -598,6 +614,7 @@ impl ConfigStore {
         validate_runtime_source(&input.global_runtime_source)?;
         settings.global_runtime_source = input.global_runtime_source;
         settings.use_system_tray = input.use_system_tray;
+        settings.autostart_on_boot = input.autostart_on_boot;
         settings.mcp_client_paths = sanitize_mcp_client_paths(input.mcp_client_paths);
         settings.mcp_merge_mode = input.mcp_merge_mode;
         settings.mcp_backup_before_write = input.mcp_backup_before_write;
@@ -606,6 +623,16 @@ impl ConfigStore {
             settings.release_repo = sanitize_release_repo(release_repo)?;
         }
 
+        write_json(&self.paths.settings_file, &*settings)?;
+        Ok(settings.clone())
+    }
+
+    /// Sprint 14 (v0.14.0): minimal setter for `autostart_on_boot`. The
+    /// Tauri command also calls into tauri-plugin-autostart to
+    /// reconcile OS-level state — this just persists the bool.
+    pub fn set_autostart_on_boot(&self, enabled: bool) -> Result<ManagerSettings, String> {
+        let mut settings = self.settings.lock().expect("settings mutex poisoned");
+        settings.autostart_on_boot = enabled;
         write_json(&self.paths.settings_file, &*settings)?;
         Ok(settings.clone())
     }
@@ -1284,6 +1311,33 @@ mod tests {
         // Renaming to the same name is a no-op (returns 0 changes).
         let count2 = store.rename_workspace("orb", "orb".into()).unwrap();
         assert_eq!(count2, 0);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Sprint 14 (v0.14.0): the new ConfigStore::set_autostart_on_boot
+    /// setter persists to disk and round-trips through read_settings.
+    #[test]
+    fn config_store_set_autostart_on_boot_persists_to_disk() {
+        let dir = unique_tempdir("autostart");
+        let paths = paths_in(&dir);
+        let store = ConfigStore {
+            paths: paths.clone(),
+            projects: Mutex::new(ProjectsFile { version: 1, projects: Vec::new() }),
+            settings: Mutex::new(ManagerSettings::default_for_paths(&paths)),
+        };
+
+        // Default is opt-in (false).
+        assert!(!store.get_settings().autostart_on_boot);
+
+        let updated = store
+            .set_autostart_on_boot(true)
+            .expect("set must succeed");
+        assert!(updated.autostart_on_boot);
+
+        // Reload from disk to confirm persistence survived the round-trip.
+        let reread = read_settings(&paths.settings_file, &paths).unwrap();
+        assert!(reread.autostart_on_boot);
 
         let _ = fs::remove_dir_all(&dir);
     }

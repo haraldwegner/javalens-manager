@@ -101,6 +101,27 @@ pub fn delete_all_projects(state: State<'_, AppState>) -> Result<ManagerDashboar
     state.manager_service.delete_all_projects()
 }
 
+/// Sprint 14 (v0.14.0): toggle autostart-on-boot in one round-trip.
+/// Persists the new value AND reconciles OS-level autostart via
+/// tauri-plugin-autostart so both ends agree before the dashboard
+/// is rebuilt for the caller.
+#[tauri::command]
+pub fn set_autostart_on_boot(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<ManagerDashboard, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    state.manager_service.set_autostart_on_boot(enabled)?;
+    let autolaunch = app.autolaunch();
+    if enabled {
+        autolaunch.enable().map_err(|error| error.to_string())?;
+    } else {
+        autolaunch.disable().map_err(|error| error.to_string())?;
+    }
+    state.manager_service.load_dashboard()
+}
+
 #[tauri::command]
 pub fn discover_workspace_projects(
     state: State<'_, AppState>,

@@ -178,6 +178,16 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
+        // Sprint 14 (v0.14.0): autostart-on-boot. Per-OS plumbing
+        // (Linux ~/.config/autostart/, macOS LaunchAgent, Windows
+        // registry) lives in the plugin; ManagerSettings.autostart_on_boot
+        // is the persisted state, reconciled on every launch (see the
+        // setup block) and on every toggle (set_autostart_on_boot
+        // command + tray on_menu_event arm).
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState { manager_service })
         .setup(|app| {
@@ -228,6 +238,25 @@ pub fn run() {
                             let _ = state.manager_service.stop_all_runtimes();
                             refresh_tray_menu(app_handle);
                         }
+                        "tray_autostart_on_boot" => {
+                            // Sprint 14 (v0.14.0): toggle the persisted
+                            // setting AND reconcile OS-level autostart
+                            // via tauri-plugin-autostart in one click.
+                            use tauri_plugin_autostart::ManagerExt;
+                            let state = app_handle.state::<AppState>();
+                            let next = !state
+                                .manager_service
+                                .get_settings()
+                                .autostart_on_boot;
+                            let _ = state.manager_service.set_autostart_on_boot(next);
+                            let autolaunch = app_handle.autolaunch();
+                            let _ = if next {
+                                autolaunch.enable()
+                            } else {
+                                autolaunch.disable()
+                            };
+                            refresh_tray_menu(app_handle);
+                        }
                         "tray_quit" => {
                             if let Some(window) = app_handle.get_webview_window("main") {
                                 let _ = window.show();
@@ -260,6 +289,25 @@ pub fn run() {
                 refresh_tray_menu(&refresh_handle);
             });
 
+            // Sprint 14 (v0.14.0): reconcile OS-level autostart with
+            // the saved `autostart_on_boot` setting at every launch.
+            // Best-effort — errors here don't block startup; the next
+            // launch reconciles again.
+            {
+                use tauri_plugin_autostart::ManagerExt;
+                let want_autostart = app
+                    .state::<AppState>()
+                    .manager_service
+                    .get_settings()
+                    .autostart_on_boot;
+                let autolaunch = app.autolaunch();
+                let _ = if want_autostart {
+                    autolaunch.enable()
+                } else {
+                    autolaunch.disable()
+                };
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -285,6 +333,7 @@ pub fn run() {
             commands::start_all_runtimes,
             commands::stop_all_runtimes,
             commands::reload_all_runtimes,
+            commands::set_autostart_on_boot,
             commands::delete_all_projects,
             commands::discover_workspace_projects,
             commands::import_workspace_projects,
@@ -358,6 +407,16 @@ fn rebuild_tray_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .manager_service
         .workspace_status_summary();
 
+    // Sprint 14 (v0.14.0): pulled out separately because the tray-side
+    // toggle for "Autostart on boot" needs its CURRENT value to render
+    // the checkmark correctly each rebuild. Tray refresh is keyed off
+    // both the workspace snapshot AND this bool (see refresh_tray_menu).
+    let autostart_on_boot = app
+        .state::<AppState>()
+        .manager_service
+        .get_settings()
+        .autostart_on_boot;
+
     let mut builder = MenuBuilder::new(app)
         .text("tray_open_dashboard", "Open dashboard")
         .separator();
@@ -382,10 +441,24 @@ fn rebuild_tray_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         builder = builder.separator();
     }
 
+    // Sprint 14 (v0.14.0): tray-side autostart toggle. CheckMenuItemBuilder
+    // surfaces a native checkmark on most platforms; GNOME-via-AppIndicator
+    // strips per-item icons but still honours the menu protocol's checked
+    // state, so the toggle stays legible.
+    use tauri::menu::CheckMenuItemBuilder;
+    let autostart_item = CheckMenuItemBuilder::with_id(
+        "tray_autostart_on_boot",
+        "Autostart on boot",
+    )
+    .checked(autostart_on_boot)
+    .build(app)?;
+
     builder
         .text("tray_start_all_services", "Start all services")
         .text("tray_reload_all_services", "Reload all services")
         .text("tray_stop_all_services", "Stop all services")
+        .separator()
+        .item(&autostart_item)
         .separator()
         .text("tray_quit", "Quit")
         .build()
@@ -403,15 +476,27 @@ fn rebuild_tray_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 /// pairs that drove the most recent successful menu swap.
 fn refresh_tray_menu<R: Runtime>(app: &AppHandle<R>) {
     use std::sync::Mutex;
-    static LAST: Mutex<Option<Vec<(String, RuntimePhase)>>> = Mutex::new(None);
+    // Sprint 14 (v0.14.0): cache key extended with `autostart_on_boot`
+    // so toggling the tray checkable from elsewhere (Settings checkbox
+    // saves through update_settings) forces a rebuild — otherwise the
+    // periodic refresh would see the workspace snapshot unchanged and
+    // skip the swap, leaving the checkmark stale.
+    type CacheKey = (Vec<(String, RuntimePhase)>, bool);
+    static LAST: Mutex<Option<CacheKey>> = Mutex::new(None);
 
-    let snapshot: Vec<(String, RuntimePhase)> = app
+    let workspace_snapshot: Vec<(String, RuntimePhase)> = app
         .state::<AppState>()
         .manager_service
         .workspace_status_summary()
         .into_iter()
         .map(|s| (s.workspace_name, s.phase))
         .collect();
+    let autostart_on_boot = app
+        .state::<AppState>()
+        .manager_service
+        .get_settings()
+        .autostart_on_boot;
+    let snapshot: CacheKey = (workspace_snapshot, autostart_on_boot);
 
     {
         let last = LAST.lock().unwrap();

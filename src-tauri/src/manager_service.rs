@@ -677,6 +677,25 @@ impl ManagerService {
         self.config_store.get_settings().use_system_tray
     }
 
+    /// Sprint 14 (v0.14.0): expose the full settings snapshot for
+    /// callers that need to read multiple fields (tray menu rebuild,
+    /// startup-reconciliation in the setup block). Thin wrapper over
+    /// `config_store.get_settings()`.
+    pub fn get_settings(&self) -> crate::config::ManagerSettings {
+        self.config_store.get_settings()
+    }
+
+    /// Sprint 14 (v0.14.0): minimal setter for `autostart_on_boot`. The
+    /// `set_autostart_on_boot` Tauri command also calls into
+    /// tauri-plugin-autostart to reconcile OS-level autostart — this
+    /// just persists the new bool and returns the updated settings.
+    pub fn set_autostart_on_boot(
+        &self,
+        enabled: bool,
+    ) -> Result<crate::config::ManagerSettings, String> {
+        self.config_store.set_autostart_on_boot(enabled)
+    }
+
     /// Downloads or updates the JavaLens runtime.
     pub fn download_or_update_javalens(&self) -> Result<ManagerDashboard, String> {
         let mut settings = self.config_store.get_settings();

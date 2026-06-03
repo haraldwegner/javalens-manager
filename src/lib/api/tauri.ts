@@ -39,6 +39,8 @@ export interface ManagerSettings {
   dataRoot: string;
   globalRuntimeSource: RuntimeSource;
   useSystemTray: boolean;
+  /** Sprint 14 (v0.14.0): manager auto-launches at session login when true. */
+  autostartOnBoot: boolean;
   mcpClientPaths: McpClientPaths;
   mcpMergeMode: McpMergeMode;
   mcpBackupBeforeWrite: boolean;
@@ -110,6 +112,8 @@ export interface UpdateSettingsInput {
   dataRoot: string;
   globalRuntimeSource: RuntimeSource;
   useSystemTray: boolean;
+  /** Sprint 14 (v0.14.0): manager auto-launches at session login when true. */
+  autostartOnBoot: boolean;
   mcpClientPaths: McpClientPaths;
   mcpMergeMode: McpMergeMode;
   mcpBackupBeforeWrite: boolean;
@@ -353,6 +357,13 @@ export function importWorkspaceProjects(input: WorkspaceImportInput): Promise<Wo
 /** Updates the manager settings. */
 export function updateSettings(input: UpdateSettingsInput): Promise<ManagerDashboard> {
   return invoke("update_settings", { input });
+}
+
+/** Sprint 14 (v0.14.0): toggle OS-level autostart-on-boot in one
+ * round-trip — persists the setting AND reconciles the OS plugin's
+ * autostart entry. */
+export function setAutostartOnBoot(enabled: boolean): Promise<ManagerDashboard> {
+  return invoke("set_autostart_on_boot", { enabled });
 }
 
 /** Redetects paths for MCP clients. */

@@ -66,6 +66,7 @@
   let autoCheckForUpdates = true;
   let dataRoot = "";
   let useSystemTray = true;
+  let autostartOnBoot = false;
   let runtimeKind: "managed" | "localJar" = "managed";
   let localJarPath = "";
   let releaseRepo = "";
@@ -163,6 +164,7 @@
       dataRoot: nextSettings.dataRoot,
       globalRuntimeSource: nextSettings.globalRuntimeSource,
       useSystemTray: nextSettings.useSystemTray,
+      autostartOnBoot: nextSettings.autostartOnBoot,
       mcpClientPaths: nextSettings.mcpClientPaths,
       mcpMergeMode: nextSettings.mcpMergeMode,
       mcpBackupBeforeWrite: nextSettings.mcpBackupBeforeWrite,
@@ -205,6 +207,7 @@
           ? { kind: "managed" }
           : { kind: "localJar", jarPath: (input.globalRuntimeSource as any).jarPath?.trim() ?? "" },
       useSystemTray: input.useSystemTray,
+      autostartOnBoot: input.autostartOnBoot,
       mcpClientPaths: normalizeMcpClientPaths(input.mcpClientPaths),
       mcpMergeMode: input.mcpMergeMode,
       mcpBackupBeforeWrite: input.mcpBackupBeforeWrite,
@@ -228,6 +231,7 @@
       autoCheckForUpdates,
       dataRoot,
       useSystemTray,
+      autostartOnBoot,
       globalRuntimeSource:
         runtimeKind === "managed"
           ? {
@@ -293,6 +297,7 @@
     autoCheckForUpdates = nextSettings.autoCheckForUpdates;
     dataRoot = nextSettings.dataRoot;
     useSystemTray = nextSettings.useSystemTray;
+    autostartOnBoot = nextSettings.autostartOnBoot;
     runtimeKind = nextSettings.globalRuntimeSource.kind;
     mcpMergeMode = nextSettings.mcpMergeMode;
     mcpBackupBeforeWrite = nextSettings.mcpBackupBeforeWrite;
@@ -723,6 +728,10 @@
           <label class="checkbox-row compact" title="When enabled, closing the window keeps the manager running in the system tray">
             <input bind:checked={useSystemTray} disabled={interactionDisabled} on:change={handleBoundEdit} type="checkbox" />
             <span>Use system tray</span>
+          </label>
+          <label class="checkbox-row compact" title="Start the manager automatically at session login (Linux ~/.config/autostart, macOS LaunchAgent, Windows registry)">
+            <input bind:checked={autostartOnBoot} disabled={interactionDisabled} on:change={handleBoundEdit} type="checkbox" />
+            <span>Autostart on boot</span>
           </label>
         </section>
 
