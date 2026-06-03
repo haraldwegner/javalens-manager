@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [ubuntu-22.04, ubuntu-22.04-arm]
+        platform: [ubuntu-22.04, ubuntu-22.04-arm, macos-14, macos-13]
     runs-on: ${{ matrix.platform }}
 
     steps:
@@ -116,3 +116,4 @@ jobs:
           files: |
             src-tauri/target/release/bundle/appimage/*.AppImage
             src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/dmg/*.dmg

@@ -37,6 +37,8 @@ See [`docs/release-notes/`](docs/release-notes/) for per-release detail.
 
 ## Installation
 
+### Linux
+
 You can install or update `javalens-manager` on Linux using the provided installation script. This script will download the latest `.AppImage` and set up a desktop entry for you.
 
 Run the following command in your terminal:
@@ -53,6 +55,39 @@ If you launch the `.AppImage` manually, ensure it has executable permission firs
 chmod +x javalens-manager_0.13.1_amd64.AppImage   # or _aarch64 on ARM
 ./javalens-manager_0.13.1_amd64.AppImage
 ```
+
+### macOS
+
+Mac users have two install options. The macOS build is unsigned in v0.14.0 (Apple Developer signing is a separate later track), so a one-time Gatekeeper bypass is required either way — see *Gatekeeper bypass* below.
+
+#### Option A — curl one-liner (terminal users)
+
+The same `install.sh` that runs on Linux now has a Darwin branch:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/hw1964/javalens-manager/main/install.sh | bash
+```
+
+It detects `uname -s` → `Darwin`, downloads the matching `.dmg` for your arch (Apple Silicon or Intel), mounts it, copies `javalens-manager.app` into `/Applications/`, unmounts, and clears the Gatekeeper quarantine attribute so the app launches without a right-click → Open dance.
+
+#### Option B — DMG download (GUI users)
+
+Download the matching `.dmg` from the [latest release page](https://github.com/hw1964/javalens-manager/releases/latest):
+
+- `javalens-manager_<version>_aarch64.dmg` — Apple Silicon (M-series chips)
+- `javalens-manager_<version>_x64.dmg` — Intel
+
+Double-click the DMG to mount it, then drag `javalens-manager.app` into `/Applications/`.
+
+#### Gatekeeper bypass (one-time)
+
+After install, run once in Terminal:
+
+```bash
+xattr -d com.apple.quarantine /Applications/javalens-manager.app
+```
+
+Alternatively: right-click the `.app` in Finder → **Open** the first time. macOS remembers the choice for subsequent launches.
 
 ### System tray on Linux
 
