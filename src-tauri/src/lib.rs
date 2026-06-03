@@ -165,6 +165,19 @@ pub fn run() {
     let manager_service = ManagerService::new(config_store, release_manager, runtime_manager);
 
     tauri::Builder::default()
+        // Sprint 14 (v0.14.0, bugs.md #3): single-instance MUST be the first
+        // plugin in the chain so the duplicate process exits before any
+        // expensive setup (tray icon registration, config-store init). The
+        // callback fires on the *original* running process when the second
+        // launch is rejected — raise its main window so the user sees the
+        // dashboard they expected from re-clicking the app menu / dock entry.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState { manager_service })
         .setup(|app| {
