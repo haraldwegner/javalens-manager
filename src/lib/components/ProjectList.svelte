@@ -29,6 +29,10 @@
   export let onRefresh: (projectId: string) => void;
   export let onStartAll: () => void;
   export let onStopAll: () => void;
+  /** Sprint 14 (v0.14.0): stop every workspace, wait for each to
+   * settle, then start them all again — single click that gives a
+   * clean restart instead of racing stop/start. */
+  export let onReloadAll: () => void;
   export let onDeleteAll: () => void;
   /** Sprint 10 v0.10.4: move a project to a different (existing or new) workspace. */
   export let onSetWorkspace: (projectId: string, workspaceName: string) => void;
@@ -636,6 +640,14 @@
         type="button"
       >
         Stop all
+      </button>
+      <button
+        disabled={disabled || projects.length === 0}
+        on:click={() => onReloadAll()}
+        title="Stop every javalens process then restart — single round-trip (~30 s max)"
+        type="button"
+      >
+        Reload all
       </button>
       <button
         disabled={disabled || projects.length === 0}

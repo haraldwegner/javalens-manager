@@ -212,6 +212,17 @@ pub fn run() {
                             let _ = state.manager_service.start_all_runtimes();
                             refresh_tray_menu(app_handle);
                         }
+                        "tray_reload_all_services" => {
+                            // Sprint 14 (v0.14.0): sequenced stop+start
+                            // across every workspace. Blocks the menu
+                            // event for up to ~30 s while polling;
+                            // the periodic refresh ticker keeps the
+                            // bullets next to each workspace current
+                            // during the gap.
+                            let state = app_handle.state::<AppState>();
+                            let _ = state.manager_service.reload_all_runtimes();
+                            refresh_tray_menu(app_handle);
+                        }
                         "tray_stop_all_services" => {
                             let state = app_handle.state::<AppState>();
                             let _ = state.manager_service.stop_all_runtimes();
@@ -273,6 +284,7 @@ pub fn run() {
             commands::delete_project,
             commands::start_all_runtimes,
             commands::stop_all_runtimes,
+            commands::reload_all_runtimes,
             commands::delete_all_projects,
             commands::discover_workspace_projects,
             commands::import_workspace_projects,
@@ -372,6 +384,7 @@ fn rebuild_tray_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 
     builder
         .text("tray_start_all_services", "Start all services")
+        .text("tray_reload_all_services", "Reload all services")
         .text("tray_stop_all_services", "Stop all services")
         .separator()
         .text("tray_quit", "Quit")

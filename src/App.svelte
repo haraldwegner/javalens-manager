@@ -482,6 +482,7 @@
               onStartAll={() => appStore.startAllProjects()}
               onStop={(projectId) => appStore.stopProject(projectId)}
               onStopAll={() => appStore.stopAllProjects()}
+              onReloadAll={() => appStore.reloadAllProjects()}
               onDelete={(projectId) => appStore.deleteProjectEntry(projectId)}
               onDeleteAll={async () => {
                 // Sprint 10 v0.10.4: "Delete all" means everything —

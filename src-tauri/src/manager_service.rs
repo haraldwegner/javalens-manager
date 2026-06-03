@@ -439,6 +439,50 @@ impl ManagerService {
         self.load_dashboard()
     }
 
+    /// Sprint 14 (v0.14.0): stop every workspace, poll until each phase
+    /// reaches `Stopped` or `Failed` (30 s deadline), then start them
+    /// all. Surfaced via the tray "Reload all services" entry and the
+    /// dashboard "Reload all" toolbar button. The sequential wait
+    /// guards against the race where a workspace is still mid-shutdown
+    /// when the respawn would otherwise fire — `start_runtime` then
+    /// fast-paths into "already running" and the user gets no actual
+    /// reload.
+    pub fn reload_all_runtimes(&self) -> Result<ManagerDashboard, String> {
+        self.stop_all_runtimes()?;
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let projects = self.config_store.list_projects();
+        loop {
+            let all_settled = projects.iter().all(|project| {
+                let reference = match self.resolve_runtime_reference(project) {
+                    Ok(reference) => reference,
+                    // Unresolvable projects can't be in a running state
+                    // either — they were never spawned. Treat as settled.
+                    Err(_) => return true,
+                };
+                match self.runtime_manager.get_runtime_status(&reference) {
+                    Ok(status) => matches!(
+                        status.phase,
+                        RuntimePhase::Stopped | RuntimePhase::Failed
+                    ),
+                    Err(_) => true,
+                }
+            });
+            if all_settled {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(
+                    "Reload all: not every workspace reached Stopped within 30 s; aborting restart"
+                        .into(),
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        self.start_all_runtimes()
+    }
+
     /// Deletes all configured projects.
     pub fn delete_all_projects(&self) -> Result<ManagerDashboard, String> {
         let project_ids: Vec<String> = self

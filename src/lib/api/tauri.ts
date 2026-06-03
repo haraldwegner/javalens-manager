@@ -329,6 +329,12 @@ export function stopAllRuntimes(): Promise<ManagerDashboard> {
   return invoke("stop_all_runtimes");
 }
 
+/** Sprint 14 (v0.14.0): stops every workspace, waits for each to reach
+ * Stopped/Failed (30 s deadline), then restarts them. */
+export function reloadAllRuntimes(): Promise<ManagerDashboard> {
+  return invoke("reload_all_runtimes");
+}
+
 /** Deletes all projects. */
 export function deleteAllProjects(): Promise<ManagerDashboard> {
   return invoke("delete_all_projects");

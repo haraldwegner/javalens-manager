@@ -12,6 +12,7 @@ import {
   getRuntimeStatus,
   probeServices as probeServicesApi,
   redetectMcpClientPaths as redetectMcpClientPathsApi,
+  reloadAllRuntimes,
   startAllRuntimes,
   startRuntime,
   stopAllRuntimes,
@@ -375,6 +376,22 @@ export function createAppStore() {
     }
   }
 
+  /** Sprint 14 (v0.14.0): stop every workspace, wait for each to settle,
+   * then start them all again. Sequenced server-side; the UI sees one
+   * round-trip that can take up to ~30 s. */
+  async function reloadAllProjects() {
+    update((state) => ({ ...state, isBusy: true, error: undefined }));
+    try {
+      syncDashboard(await reloadAllRuntimes());
+    } catch (error) {
+      update((state) => ({
+        ...state,
+        isBusy: false,
+        error: normalizeError(error)
+      }));
+    }
+  }
+
   async function stopProject(projectId: string) {
     update((state) => ({ ...state, isBusy: true, error: undefined }));
 
@@ -564,6 +581,7 @@ export function createAppStore() {
     startProject,
     startAllProjects,
     stopAllProjects,
+    reloadAllProjects,
     stopProject,
     refreshProjectStatus,
     selectProject,
