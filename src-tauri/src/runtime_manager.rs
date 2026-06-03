@@ -39,6 +39,13 @@ pub struct RuntimeStatusRecord {
     pub resolved_jar_path: String,
     pub service_mode: String,
     pub detail: String,
+    /// Sprint 14 (v0.14.0, bugs.md #2): captured from the dead-process
+    /// branch of `try_join_running_workspace*` when the child exited
+    /// without the manager initiating the stop. None for healthy or
+    /// cleanly-stopped runtimes. `#[serde(default)]` lets older
+    /// runtime-state.json files (pre-v0.14.0) deserialize cleanly.
+    #[serde(default)]
+    pub exit_code: Option<i32>,
 }
 
 /// Sprint 12 (v0.12.0): one entry per workspace_name, with a phase
@@ -78,6 +85,7 @@ impl RuntimeStatusRecord {
             workspace_dir,
             runtime_label,
             detail,
+            exit_code: None,
         }
     }
 }
@@ -225,6 +233,7 @@ impl RuntimeManager {
             resolved_jar_path: reference.resolved_jar_path.clone(),
             service_mode: "manager-process".into(),
             detail: "Process launched. workspace.json drives in-process project loading.".into(),
+            exit_code: None,
         };
 
         let mut members = HashSet::new();
@@ -309,6 +318,7 @@ impl RuntimeManager {
             resolved_jar_path: reference.resolved_jar_path.clone(),
             service_mode: "manager-process".into(),
             detail,
+            exit_code: None,
         };
 
         self.persist_snapshot(status.clone())?;
@@ -377,6 +387,7 @@ impl RuntimeManager {
                 resolved_jar_path: reference.resolved_jar_path.clone(),
                 service_mode: "manager-process".into(),
                 detail: "Runtime has not been started yet.".into(),
+                exit_code: None,
             }))
     }
 
@@ -462,21 +473,31 @@ impl RuntimeManager {
             .try_wait()
             .map_err(|error| format!("failed to inspect JavaLens process state: {error}"))?
         {
-            // Process has died — treat as no running workspace; caller
-            // will spawn a new one.
+            // Sprint 14 (v0.14.0, bugs.md #2): the process died without the
+            // manager initiating the stop. All stop paths (stop_runtime /
+            // stop_workspace_runtime / remove_project_runtime) hold the
+            // handles mutex while they `handles.remove()` + `child.kill()`
+            // + `child.wait()`, so by the time anyone re-locks the map a
+            // manager-initiated stop is visible as handle-not-present.
+            // Reaching this branch with the handle still in the map
+            // therefore IS the external-death case (kill -9, crash, OOM)
+            // — persist Failed with the captured exit code. Pre-v0.14.0
+            // wrote Stopped here; the tray glyph stayed gray on external
+            // kill instead of going red ✗.
+            let exit_code = exit_status.code();
             let detail = if exit_status.success() {
-                "Previous workspace runtime exited cleanly; respawning.".into()
+                "Previous workspace runtime exited unexpectedly (status 0); respawning.".into()
             } else {
-                format!("Previous workspace runtime exited with status {exit_status}; respawning.")
+                format!(
+                    "Previous workspace runtime exited unexpectedly with status {exit_status}; respawning."
+                )
             };
             handles.remove(&reference.workspace_name);
             drop(handles);
 
-            // Persist a stopped snapshot for visibility, but signal "not
-            // running" so the caller spawns afresh.
-            let stopped = RuntimeStatusRecord {
+            let failed = RuntimeStatusRecord {
                 project_id: reference.project_id.clone(),
-                phase: RuntimePhase::Stopped,
+                phase: RuntimePhase::Failed,
                 workspace_name: reference.workspace_name.clone(),
                 transport: "stdio".into(),
                 pid: None,
@@ -486,8 +507,9 @@ impl RuntimeManager {
                 resolved_jar_path: reference.resolved_jar_path.clone(),
                 service_mode: "manager-process".into(),
                 detail,
+                exit_code,
             };
-            self.persist_snapshot(stopped)?;
+            self.persist_snapshot(failed)?;
             return Ok(None);
         }
 
@@ -510,6 +532,7 @@ impl RuntimeManager {
             service_mode: "manager-process".into(),
             detail: "Joined live workspace runtime; tools/list reflects current workspace.json."
                 .into(),
+            exit_code: None,
         };
         drop(handles);
         self.persist_snapshot(status.clone())?;
@@ -528,13 +551,40 @@ impl RuntimeManager {
             return Ok(None);
         };
 
-        if let Some(_exit_status) = handle
+        if let Some(exit_status) = handle
             .child
             .try_wait()
             .map_err(|error| format!("failed to inspect JavaLens process state: {error}"))?
         {
-            // Dead process — caller will see the persisted snapshot.
+            // Sprint 14 (v0.14.0, bugs.md #2): same external-death case as
+            // `try_join_running_workspace`. The readonly variant previously
+            // just removed the handle and returned None, leaving a stale
+            // Running snapshot visible to the next get_runtime_status. Now
+            // persist a Failed snapshot here too so the dashboard / tray
+            // reflect the death without waiting for an explicit start.
+            let exit_code = exit_status.code();
+            let detail = if exit_status.success() {
+                "Workspace runtime exited unexpectedly (status 0).".into()
+            } else {
+                format!("Workspace runtime exited unexpectedly with status {exit_status}.")
+            };
+            let failed = RuntimeStatusRecord {
+                project_id: reference.project_id.clone(),
+                phase: RuntimePhase::Failed,
+                workspace_name: reference.workspace_name.clone(),
+                transport: "stdio".into(),
+                pid: None,
+                workspace_dir: reference.workspace_dir.clone(),
+                log_path: self.default_log_path(&reference.workspace_name),
+                runtime_label: reference.runtime_label.clone(),
+                resolved_jar_path: reference.resolved_jar_path.clone(),
+                service_mode: "manager-process".into(),
+                detail,
+                exit_code,
+            };
             handles.remove(&reference.workspace_name);
+            drop(handles);
+            self.persist_snapshot(failed)?;
             return Ok(None);
         }
 
@@ -555,6 +605,7 @@ impl RuntimeManager {
             resolved_jar_path: handle.resolved_jar_path.clone(),
             service_mode: "manager-process".into(),
             detail: "Live workspace runtime.".into(),
+            exit_code: None,
         };
         Ok(Some(status))
     }
@@ -926,6 +977,93 @@ mod tests {
 
         // Cleanup.
         manager.stop_workspace_runtime("ws-b").unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ============================================================
+    // Sprint 14 (v0.14.0, bugs.md #2): process-death → Failed (was Stopped)
+    // ============================================================
+
+    /// Spawn a command that exits immediately with code 1. The next
+    /// status read must observe Failed with exit_code Some(1) — not
+    /// Stopped (the pre-v0.14.0 behavior that this bug fix corrects).
+    #[cfg(unix)]
+    #[test]
+    fn unexpected_exit_transitions_to_failed_with_code() {
+        let dir = unique_tempdir("unexpected-exit");
+        let paths = paths_in(&dir);
+        let manager = RuntimeManager::new(paths);
+
+        let ws_dir = dir.join("ws").join("test").to_string_lossy().to_string();
+        let reference = make_reference("p-1", "test", &ws_dir);
+        let log = dir
+            .join("logs")
+            .join("test.log")
+            .to_string_lossy()
+            .to_string();
+
+        let spec = CommandSpec {
+            command: "sh".into(),
+            args: vec!["-c".into(), "exit 1".into()],
+            env: vec![],
+            log_path: log,
+        };
+        manager
+            .start_runtime_with_spec(&reference, spec)
+            .expect("start must succeed before the child exits");
+
+        // Give the child time to exit and be reaped by try_wait on the
+        // next status read.
+        std::thread::sleep(Duration::from_millis(200));
+
+        let status = manager
+            .get_runtime_status(&reference)
+            .expect("status read must succeed after death");
+        assert!(
+            matches!(status.phase, RuntimePhase::Failed),
+            "phase should be Failed after unexpected exit, was {:?}",
+            status.phase
+        );
+        assert_eq!(
+            status.exit_code,
+            Some(1),
+            "exit_code should reflect the child's exit status"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// User-initiated stop (single-member workspace) → handle removed +
+    /// kill + wait, all synchronous under the handles mutex. The
+    /// resulting status must be Stopped with no exit_code attribution.
+    #[cfg(unix)]
+    #[test]
+    fn user_stop_transitions_to_stopped() {
+        let dir = unique_tempdir("user-stop");
+        let paths = paths_in(&dir);
+        let manager = RuntimeManager::new(paths);
+
+        let ws_dir = dir.join("ws").join("test").to_string_lossy().to_string();
+        let reference = make_reference("p-1", "test", &ws_dir);
+        let log = dir
+            .join("logs")
+            .join("test.log")
+            .to_string_lossy()
+            .to_string();
+
+        manager
+            .start_runtime_with_spec(&reference, sleep_spec(&ws_dir, log))
+            .unwrap();
+        let status = manager.stop_runtime(&reference).unwrap();
+
+        assert!(
+            matches!(status.phase, RuntimePhase::Stopped),
+            "user stop should produce Stopped, was {:?}",
+            status.phase
+        );
+        assert_eq!(status.exit_code, None);
+        assert!(manager.workspace_pid("test").is_none());
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
