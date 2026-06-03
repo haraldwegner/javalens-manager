@@ -35,13 +35,84 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
-      - name: Build and bundle Tauri app
+      # Sprint 14 (v0.14.0, bugs.md #1 full fix): tauri-action builds
+      # the bundles but does NOT upload them yet (tagName omitted on
+      # purpose). The Linux-only step below post-processes the AppImage
+      # and .deb to bake WEBKIT_DISABLE_DMABUF_RENDERER=1 in, then the
+      # final softprops step uploads the patched artifacts to the draft
+      # release. macOS artifacts (Stage 6) pass through unmodified.
+      - name: Build Tauri app (build only — upload happens below)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bake WEBKIT_DISABLE_DMABUF_RENDERER into AppImage AppRun + .deb wrapper (ubuntu only)
+        if: startsWith(matrix.platform, 'ubuntu-')
+        run: |
+          set -euo pipefail
+
+          ARCH=$(uname -m)
+          case "$ARCH" in
+            x86_64)  APPIMAGETOOL_ARCH=x86_64 ;;
+            aarch64) APPIMAGETOOL_ARCH=aarch64 ;;
+            *)       echo "Unsupported arch: $ARCH"; exit 1 ;;
+          esac
+
+          # --- AppImage: extract → patch AppRun → repack ---
+          pushd src-tauri/target/release/bundle/appimage
+          APP_IMAGE=$(ls javalens-manager_*.AppImage | head -1)
+          chmod +x "$APP_IMAGE"
+          ./"$APP_IMAGE" --appimage-extract >/dev/null
+          if ! grep -q '^exec ' squashfs-root/AppRun; then
+            echo "Error: AppRun does not contain an 'exec' line at column 1; bake-in failed."
+            echo "--- AppRun contents ---"
+            cat squashfs-root/AppRun
+            exit 1
+          fi
+          # Inject export line before the first exec in AppRun.
+          # WebKitGTK >= 2.42 DMABUF compositor fails silently on
+          # NVIDIA Grace (aarch64, GB10) and some x86_64 GPU stacks
+          # — disabling it via this env-var avoids the blank webview.
+          sed -i '0,/^exec /{s|^exec |export WEBKIT_DISABLE_DMABUF_RENDERER=1\nexec |}' squashfs-root/AppRun
+          # Repack. --appimage-extract-and-run avoids FUSE on CI runners.
+          wget -q "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${APPIMAGETOOL_ARCH}.AppImage" -O /tmp/appimagetool
+          chmod +x /tmp/appimagetool
+          /tmp/appimagetool --appimage-extract-and-run squashfs-root "$APP_IMAGE"
+          rm -rf squashfs-root /tmp/appimagetool
+          popd
+
+          # --- .deb: unpack → move binary + write wrapper → repack ---
+          pushd src-tauri/target/release/bundle/deb
+          DEB=$(ls javalens-manager_*.deb | head -1)
+          rm -rf /tmp/deb-extract
+          mkdir -p /tmp/deb-extract
+          dpkg-deb -R "$DEB" /tmp/deb-extract
+          mkdir -p /tmp/deb-extract/usr/lib/javalens-manager
+          mv /tmp/deb-extract/usr/bin/javalens-manager /tmp/deb-extract/usr/lib/javalens-manager/javalens-manager
+          # Wrapper at /usr/bin/javalens-manager: sets the env-var,
+          # then execs the real binary. Covers BOTH shell launches
+          # and GNOME/KDE app-menu launches (which exec via PATH).
+          printf '%s\n' \
+            '#!/usr/bin/env bash' \
+            '# Sprint 14 (v0.14.0, bugs.md #1): baked at .deb build time so' \
+            '# users who install via `dpkg -i` get the blank-webview fix.' \
+            'export WEBKIT_DISABLE_DMABUF_RENDERER=1' \
+            'exec /usr/lib/javalens-manager/javalens-manager "$@"' \
+            > /tmp/deb-extract/usr/bin/javalens-manager
+          chmod +x /tmp/deb-extract/usr/bin/javalens-manager
+          dpkg-deb -b /tmp/deb-extract "$DEB"
+          rm -rf /tmp/deb-extract
+          popd
+
+      - name: Upload artifacts to draft release
+        uses: softprops/action-gh-release@v2
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'javalens-manager ${{ github.ref_name }}'
-          releaseBody: 'See the assets to download this version and install.'
-          releaseDraft: true
+          tag_name: ${{ github.ref_name }}
+          name: 'javalens-manager ${{ github.ref_name }}'
+          body: 'See the assets to download this version and install.'
+          draft: true
           prerelease: false
+          fail_on_unmatched_files: false
+          files: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
