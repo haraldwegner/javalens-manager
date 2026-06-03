@@ -6,7 +6,7 @@ Desktop manager for running and orchestrating JavaLens MCP servers across multip
 
 ## Status
 
-**Beta (v0.13.1)**: `javalens-manager` is a fully functional desktop application on Linux (x86_64 and aarch64). It supports named workspaces of multiple Java projects (each running as one shared JavaLens MCP service), live `workspace.json`-driven reconciliation, automatic fork-runtime download/update, and one-click deploy of MCP entries into Cursor / Claude Desktop / Antigravity / IntelliJ-style configs. The system-tray menu drives per-workspace lifecycle without opening the window. macOS and Windows builds are not yet automated; broader QA and cross-platform testing continue before a stable 1.0.
+**Beta (v0.14.0)**: `javalens-manager` is a fully functional desktop application on Linux (x86_64 and aarch64) and macOS (Apple Silicon and Intel — unsigned in v0.14.0, Gatekeeper bypass required). It supports named workspaces of multiple Java projects (each running as one shared JavaLens MCP service), live `workspace.json`-driven reconciliation, automatic fork-runtime download/update, and one-click deploy of MCP entries into Cursor / Claude Desktop / Antigravity / IntelliJ-style configs. The system-tray menu drives per-workspace lifecycle without opening the window; "Reload all" and "Autostart on boot" land in this release. Windows builds are not yet automated; broader QA and cross-platform testing continue before a stable 1.0.
 
 ### Version timeline
 
@@ -18,6 +18,7 @@ Desktop manager for running and orchestrating JavaLens MCP servers across multip
 - **v0.13.0** — Sprint 13: tray menu refined for the GNOME / AppIndicator reality. Per-menu-item icons get stripped on GNOME, so the colored disks shipped in v0.12.0 never reached the user — replaced with monochrome unicode bullets (`●` running, `◐` starting, `○` stopped, `✗` failed) that render reliably in the menu's own font. Cleaner menu shape: `Open dashboard` (raises the main window) → workspaces with bullets (click toggles) → Start all / Stop all → Quit. Plus a real fix: tray menu now reflects workspace renames within ~1 s instead of waiting for a runtime restart (workspace_status_summary reads names from the live config_store, not the cached runtime snapshots). 1-second poll with cache-keyed change detection so the menu doesn't flicker on steady state. Paired with [fork v1.7.0](https://github.com/hw1964/javalens-mcp/releases/tag/v1.7.0) which ships 11 new MCP tools across Ring 2 (code generation), Ring 3 (Maven dependency management), Ring 4 (formatter / workflow polish) — **73 tools per service**.
 
 - **v0.13.1** — packaging patch: GitHub release workflow now also builds for Linux **aarch64** on a free `ubuntu-22.04-arm` runner, so every tag publishes both `_amd64` and `_arm64` artifacts. `install.sh` now detects `uname -m` and pulls the matching AppImage automatically — the same `curl … | bash` works on x86_64 and ARM laptops/servers (verified on NVIDIA DGX Spark / GB10).
+- **v0.14.0** (Sprint 14) — hardening + features + Mac packaging. Three open manager bugs FIXED: #3 single-instance enforcement (`tauri-plugin-single-instance`), #2 process-death → Failed instead of Stopped (red `✗` glyph for external kill), #1 full fix for webview-blank-on-aarch64 (env-var baked into AppImage AppRun + .deb wrapper at CI build time, covers `dpkg -i` and direct-double-click install paths). New tray + dashboard feature: **Reload all** (sequenced stop-all → poll-until-stopped → start-all, 30 s deadline). New resident-service feature: **Autostart on boot** via `tauri-plugin-autostart`, surfaced as a Settings checkbox AND a checkable tray menu item. macOS packaging in CI (`macos-14` Apple Silicon + `macos-13` Intel matrix entries). install.sh gains a Darwin branch; README documents both Option A (curl one-liner) and Option B (DMG drag-drop) install paths plus the Gatekeeper bypass for unsigned builds.
 
 See [`docs/release-notes/`](docs/release-notes/) for per-release detail.
 
@@ -52,8 +53,8 @@ Alternatively, you can download the `.deb` or `.AppImage` files manually from th
 If you launch the `.AppImage` manually, ensure it has executable permission first:
 
 ```bash
-chmod +x javalens-manager_0.13.1_amd64.AppImage   # or _aarch64 on ARM
-./javalens-manager_0.13.1_amd64.AppImage
+chmod +x javalens-manager_0.14.0_amd64.AppImage   # or _aarch64 on ARM
+./javalens-manager_0.14.0_amd64.AppImage
 ```
 
 ### macOS

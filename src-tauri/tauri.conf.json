@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "javalens-manager",
-  "version": "0.13.1",
+  "version": "0.14.0",
   "identifier": "com.hw1964.javalens-manager",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -25,7 +25,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "appimage"],
+    "targets": "all",
     "category": "Development",
     "icon": [
       "icons/32x32.png",

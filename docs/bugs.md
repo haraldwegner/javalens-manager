@@ -10,7 +10,7 @@ For each entry include: ID, date observed, severity, reproducer, expected vs act
 
 ## #3 — Launching the app while already running spawns a second instance (and a second tray icon)
 
-- **Status:** OPEN
+- **Status:** FIXED in v0.14.0 (Sprint 14, commit `62cc728`) — `tauri-plugin-single-instance` v2.4.2 chained FIRST in the Tauri Builder; callback does `unminimize → show → set_focus` on the running process's `main` window. Duplicate process exits before any expensive setup.
 - **Date observed:** 2026-05-11
 - **Reporter:** Harald
 - **Server version:** all versions through manager v0.13.1.
@@ -57,7 +57,7 @@ Two processes both writing to `~/.config/javalens-manager/projects.json` is an u
 
 ## #2 — Process-death flips workspace to `Stopped` instead of `Failed` (tray glyph stays gray, not red)
 
-- **Status:** OPEN — known since Sprint 12; cut-lined into Sprint 13 (see `v0.13.0` plan's Verification §5: *"... within ~5s the popover's dot for that workspace flips to gray (or red, once Process-death → Failed lands; tracked separately in upgrade-checklist)"*); now formally filed.
+- **Status:** FIXED in v0.14.0 (Sprint 14, commit `ef8b4c8`) — `RuntimeStatusRecord` gained an additive `exit_code: Option<i32>` field; `try_join_running_workspace*` now persists `RuntimePhase::Failed` on detected external death instead of `Stopped`. `RuntimePhase` stays a 4-variant unit enum (preserves frontend `status.phase === "failed"` wire format). All stop paths hold the handles mutex while they `handles.remove() + kill() + wait()` synchronously, so reaching the `try_wait → Some` branch IS the external-death case.
 - **Date observed:** Sprint 12 (~2026-04-23); re-flagged 2026-05-11.
 - **Reporter:** Harald, via the agent-feedback / Sprint-13 cut-line trail.
 - **Server version:** manager v0.13.1 (all v0.12.x and v0.13.x affected).
@@ -105,7 +105,7 @@ Sprint 13 was scoped to the tray-menu refinement against AppIndicator/GNOME cons
 
 ## #1 — Tauri webview renders blank on aarch64 / NVIDIA Grace (and some x86_64 GPU stacks)
 
-- **Status:** PARTIAL FIX in v0.13.1 install.sh wrapper (commit `7f1f7b7`, 2026-05-11); **full fix pending v0.13.2** (bake the env-var into the `.deb` postinst and AppImage entry point so users who skip `install.sh` also get it).
+- **Status:** FIXED in v0.14.0 (Sprint 14, commit `ddd20d4`) — CI post-bundle step bakes `WEBKIT_DISABLE_DMABUF_RENDERER=1` into the AppImage's `AppRun` AND a `/usr/bin/javalens-manager` wrapper inside the `.deb` (binary moved to `/usr/lib/javalens-manager/`). Every install path is covered (curl one-liner, `dpkg -i`, direct AppImage double-click). install.sh simplified accordingly — wrapper-write block removed; AppImage installed directly to `$BIN_DIR/$APP_NAME`.
 - **Date observed:** 2026-05-11
 - **Reporter:** Harald, on Gigabyte AI Top Atom (NVIDIA DGX Spark / GB10).
 - **Server version:** manager v0.13.1 (`.deb` and `.AppImage` aarch64 builds from the v0.13.1 ARM CI matrix).

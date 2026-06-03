@@ -1,6 +1,6 @@
 [package]
 name = "javalens-manager"
-version = "0.13.1"
+version = "0.14.0"
 description = "Desktop manager for running JavaLens MCP across multiple Java projects."
 edition = "2021"
 
