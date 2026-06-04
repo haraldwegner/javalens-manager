@@ -209,7 +209,7 @@ In `JavaLensApplication.registerTools()`: drop the 13 register lines, add the 2 
 
 ### Why this is part of Sprint 11, not deferred
 
-Move-class and repackaging are the most error-prone operations in agent-driven Java work. Without first-class JDT-backed refactoring, the agent has to do find-and-replace across imports, qualified-name strings, and class-file paths by hand — every JATS-style RCP overhaul, bundle merge, package rename, or hierarchy reshuffle fights the agent. With JDT LTK behind these tools, the agent gets the same atomic, reference-aware refactoring Eclipse/IntelliJ users have had for two decades. Combined with javalens-manager, this turns javalens-mcp into an actually professional-grade tool for autonomous Java development — a level upstream is unlikely to reach because they don't have the use case driving it.
+Move-class and repackaging are the most error-prone operations in agent-driven Java work. Without first-class JDT-backed refactoring, the agent has to do find-and-replace across imports, qualified-name strings, and class-file paths by hand — every multi-bundle RCP overhaul, bundle merge, package rename, or hierarchy reshuffle fights the agent. With JDT LTK behind these tools, the agent gets the same atomic, reference-aware refactoring Eclipse/IntelliJ users have had for two decades. Combined with javalens-manager, this turns javalens-mcp into an actually professional-grade tool for autonomous Java development — a level upstream is unlikely to reach because they don't have the use case driving it.
 
 ### What's in Ring 1
 
@@ -327,7 +327,7 @@ Plus 1 integration test: `pullUp_acrossOsgiBundles` — fixture with two PDE bun
 
 ### Out of scope for Phase E (deferred to Sprint 12 or later)
 
-These are also Eclipse/IntelliJ standards but not required for the JATS overhaul this sprint:
+These are also Eclipse/IntelliJ standards but not required for the large RCP refactoring use case this sprint:
 
 - `convert_local_to_field` / `convert_field_to_local`
 - `replace_constructor_with_factory` / `inline_constructor`
@@ -340,7 +340,7 @@ These are also Eclipse/IntelliJ standards but not required for the JATS overhaul
 
 ### Phase E size warning
 
-Phase E makes Sprint 11 substantially bigger than originally planned (was ~2 weeks for detection-matrix + cutover; now ~3 weeks with 5 LTK refactorings added). Acceptable because the JATS overhaul depends on these tools and "do them in Sprint 12" would mean an extra fork release for one feature set. If the sprint runs over, the natural cut line is to ship Phases A/B/C/D as `v1.5.0` first, then a fast follow-up `v1.5.1` with Phase E once the LTK plumbing settles.
+Phase E makes Sprint 11 substantially bigger than originally planned (was ~2 weeks for detection-matrix + cutover; now ~3 weeks with 5 LTK refactorings added). Acceptable because the RCP refactoring use case depends on these tools and "do them in Sprint 12" would mean an extra fork release for one feature set. If the sprint runs over, the natural cut line is to ship Phases A/B/C/D as `v1.5.0` first, then a fast follow-up `v1.5.1` with Phase E once the LTK plumbing settles.
 
 ## Phase F — Cutover release (fork v1.5.0 + manager v0.11.0)
 
@@ -383,7 +383,7 @@ No Rust or Svelte code changes are needed for the cutover itself. Sprint 10 alre
 
 ## Out of scope (deferred)
 
-- **External PDE target-platform expansion.** Bundling `org.eclipse.pde.core` + friends (~30 plugins, ~5–10 MB install size) and using `TargetPlatformService` to expand `Require-Bundle` against external `.target` files or an installed Eclipse install. Bigger effort. Workspace bundle pool covers the inter-workspace case which is the dominant case for the user's projects (JATS bundles all live together). Defer until external deps actually become a blocker.
+- **External PDE target-platform expansion.** Bundling `org.eclipse.pde.core` + friends (~30 plugins, ~5–10 MB install size) and using `TargetPlatformService` to expand `Require-Bundle` against external `.target` files or an installed Eclipse install. Bigger effort. Workspace bundle pool covers the inter-workspace case which is the dominant case for the user's projects (the RCP product's bundles all live together). Defer until external deps actually become a blocker.
 - **Bazel improvements.** Today's Bazel handler walks for BUILD files + jars in `bazel-{bin,out}`. Not a priority for current user projects.
 - **Multi-language indexing (Kotlin, Scala).** JDT does some Kotlin via plugins, but full Kotlin/Scala source indexing is out of scope.
 
@@ -403,18 +403,18 @@ Math after Sprint 11: 60 (javalens, post-Phase E) + 0 (GitKraken removed) = 60, 
 
 ### IDE-grade roadmap (Sprint 12+, preview only)
 
-Captured 2026-04-26 from the strategic discussion on what extends javalens to "full-IDE-grade autonomous Java development" — driven by the JATS RCP overhaul use case (safe upgrades, bundle reshuffles, JDK migration). **Ring 1 was originally planned for Sprint 12 but its core refactoring tools (move/pull/push/encapsulate) were pulled forward into Sprint 11 Phase E.** Remaining Ring 1 + Rings 2-4 below.
+Captured 2026-04-26 from the strategic discussion on what extends javalens to "full-IDE-grade autonomous Java development" — driven by the RCP overhaul use case (safe upgrades, bundle reshuffles, JDK migration). **Ring 1 was originally planned for Sprint 12 but its core refactoring tools (move/pull/push/encapsulate) were pulled forward into Sprint 11 Phase E.** Remaining Ring 1 + Rings 2-4 below.
 
 **Ring 1 — workspace verification (deferred to Sprint 12; ~2 tools):**
 - `compile_workspace` — one tool returning every diagnostic across all loaded projects. The missing feedback loop that lets agents verify "did this refactor break anything?" in one call.
 - `run_tests(class | method | package)` — JUnit launching + capture. Closes the refactor → test → fix loop.
 
-After Sprint 11 Phase E + Sprint 12 Ring 1 verification, JATS upgrades become a "find what to change → refactor → compile → test" loop the agent can run end-to-end.
+After Sprint 11 Phase E + Sprint 12 Ring 1 verification, large-scale RCP upgrades become a "find what to change → refactor → compile → test" loop the agent can run end-to-end.
 
 **Ring 2 — rounds out the IDE-grade autonomous loop** (~one sprint, 6–8 tools):
 - `generate_constructor`, `generate_equals_hashcode`, `generate_to_string`, `generate_getters_setters`, `override_methods` — JDT has all the AST APIs.
 - `convert_lambda_to_method_reference` (companion to existing `convert_anonymous_to_lambda`).
-- `migrate_jdk_api(target=var | switch_expr | sealed_types | records | text_blocks)` — bulk JDK-version migration tool. Critical for JATS JDK 17 → 21 upgrade.
+- `migrate_jdk_api(target=var | switch_expr | sealed_types | records | text_blocks)` — bulk JDK-version migration tool. Critical for the JDK 17 → 21 upgrade use case.
 - "Fix all of kind X across project" — bulk quick-fix application.
 
 **Ring 3 — Eclipse plugin packaging** (~one sprint, no new tools):
@@ -428,7 +428,7 @@ JDT debug uses JPDA/JDI (`org.eclipse.jdt.debug.core`). Full surface: breakpoint
 The fork (`hw1964/javalens-mcp`) is the user's own version. Upstream PR back to `pzalutski-pixel/javalens-mcp` is **deferred indefinitely**, not abandoned:
 
 - Sprint 9 (source resolution) and Sprint 10 Phase A (multi-project workspace) work IS general — would benefit any javalens user — and is PR-ready (ADR 0004 portability constraint paid the prep cost up front). Diff stays clean for as long as we want to wait.
-- Future work (Rings 1-4, especially Ring 3's Eclipse plugin packaging) is increasingly JATS-driven. PR-able pieces will be a subset; review-cycle tax on the full set isn't justified.
+- Future work (Rings 1-4, especially Ring 3's Eclipse plugin packaging) is increasingly driven by the RCP use case. PR-able pieces will be a subset; review-cycle tax on the full set isn't justified.
 - Pzalutski's roadmap is presumably solved for the single-developer / handful-of-projects case (probably a bash script). The 28-project scale that motivated this fork is a different problem and unlikely to be a priority for him.
 - **Networked-service direction.** A future "javalens as a hosted service" (HTTPS + auth + multi-user) is captured separately in [`sprint-future-networked-service.md`](sprint-future-networked-service.md). That direction fundamentally diverges from upstream's local-stdio product identity and is the strongest argument for keeping the fork — the auth/TLS/multi-user surface is too opinionated and too operationally-coupled to PR back. Not scheduled, but marked as a real long-term direction.
 - Re-evaluate the PR question only if (a) upstream goes inactive, (b) we want their user base for free testing, or (c) we've stabilized to the point where convergence beats independence. None of those are true today.

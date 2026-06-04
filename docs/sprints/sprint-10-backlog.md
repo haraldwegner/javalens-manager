@@ -18,7 +18,7 @@ Reference plan: `~/.claude/plans/make-a-plan-happy-fern.md` (Sprint 10 section i
 
 - 28 javalens services (one per registered project) × 63 tools per service = 1,764 tool registrations against Antigravity. Each new project adds another service and another 63 tool entries; the path to the ~100-service ceiling is straight-line.
 - 63 JVM processes running simultaneously is heavy on RAM and slow on cold start.
-- Related projects (e.g., the dozen JATS2 OSGi bundles) belong to one logical workspace but live in separate, unrelated MCP services today.
+- Related projects (e.g., a dozen related OSGi bundles in one RCP product) belong to one logical workspace but live in separate, unrelated MCP services today.
 - The `javalens-mcp` `WorkspaceManager` is single-project by design. Tools assume one current `IJavaProject`.
 
 ## Repos touched
@@ -139,7 +139,7 @@ New persisted state in `settings.json`:
 ```json
 "workspace_labels": {
   "11100": "strategies-orb",
-  "11102": "jats2-bundles"
+  "11102": "example-bundles"
 }
 ```
 
@@ -176,7 +176,7 @@ Port
 [ Select ▾ ]
   - New port (next free: 11100)             ← default, top option
   - 11101 — strategies-orb                   ← existing service
-  - 11102 — jats2 (12 projects)              ← existing service with label + count
+  - 11102 — example (12 projects)            ← existing service with label + count
   - Custom port…
 ```
 
@@ -232,7 +232,7 @@ Options:
 - (b) **Optional user-editable label** stored in `settings.json` under a new `workspace_labels` map, falling back to first-project-slug if unset. Service ID and grouped-view header use the label.
 - (c) Label stored on each `ProjectRecord` (per-project). Display rule: take the label of the first project on that port. Awkward when projects move between ports.
 
-Recommend **(b)**. Lets users name important workspaces (`jats2-core`, `orb-stack`) without making it mandatory.
+Recommend **(b)**. Lets users name important workspaces (`example-core`, `another-stack`) without making it mandatory.
 
 ### Q2. Workspace-import port allocation
 

@@ -1081,7 +1081,7 @@ mod tests {
         // Workspace names are user-visible labels; we only trim outer
         // whitespace. Spaces, dashes, mixed case all survive — slug
         // hygiene happens at MCP-service-ID derivation time, not here.
-        assert_eq!(sanitize_workspace_name("  jats  "), "jats");
+        assert_eq!(sanitize_workspace_name("  alpha  "), "alpha");
         assert_eq!(sanitize_workspace_name("My Workspace"), "My Workspace");
         assert_eq!(sanitize_workspace_name("workspace-11100"), "workspace-11100");
     }
@@ -1188,7 +1188,7 @@ mod tests {
               "id": "p1",
               "name": "X",
               "projectPath": "/projects/x",
-              "workspaceName": "jats",
+              "workspaceName": "alpha",
               "assignedPort": 11100
             }
           ]
@@ -1196,7 +1196,7 @@ mod tests {
         fs::write(&path, raw).unwrap();
 
         let parsed = read_projects(&path).unwrap();
-        assert_eq!(parsed.projects[0].workspace_name, "jats");
+        assert_eq!(parsed.projects[0].workspace_name, "alpha");
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -1218,11 +1218,11 @@ mod tests {
             .add_project(AddProjectInput {
                 name: "Alpha".into(),
                 project_path: "/projects/alpha".into(),
-                workspace_name: "jats".into(),
+                workspace_name: "alpha".into(),
             })
             .expect("add_project should succeed");
 
-        assert_eq!(project.workspace_name, "jats");
+        assert_eq!(project.workspace_name, "alpha");
         assert_eq!(project.assigned_port, 0);
 
         // Empty workspace_name → "workspace-default".
@@ -1252,18 +1252,18 @@ mod tests {
             .add_project(AddProjectInput {
                 name: "Alpha".into(),
                 project_path: "/projects/alpha".into(),
-                workspace_name: "jats".into(),
+                workspace_name: "alpha".into(),
             })
             .unwrap();
 
         let updated = store
-            .set_project_workspace(&project.id, "orb".into())
+            .set_project_workspace(&project.id, "beta".into())
             .expect("rename should succeed");
 
-        assert_eq!(updated.workspace_name, "orb");
+        assert_eq!(updated.workspace_name, "beta");
         // Persisted to disk.
         let reread = read_projects(&paths.projects_file).unwrap();
-        assert_eq!(reread.projects[0].workspace_name, "orb");
+        assert_eq!(reread.projects[0].workspace_name, "beta");
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -1281,21 +1281,21 @@ mod tests {
         store.add_project(AddProjectInput {
             name: "A".into(),
             project_path: "/p/a".into(),
-            workspace_name: "jats".into(),
+            workspace_name: "alpha".into(),
         }).unwrap();
         store.add_project(AddProjectInput {
             name: "B".into(),
             project_path: "/p/b".into(),
-            workspace_name: "jats".into(),
+            workspace_name: "alpha".into(),
         }).unwrap();
         store.add_project(AddProjectInput {
             name: "C".into(),
             project_path: "/p/c".into(),
-            workspace_name: "orb".into(),
+            workspace_name: "beta".into(),
         }).unwrap();
 
         let count = store
-            .rename_workspace("jats", "jats-2".into())
+            .rename_workspace("alpha", "alpha-2".into())
             .expect("rename should succeed");
         assert_eq!(count, 2);
 
@@ -1304,12 +1304,12 @@ mod tests {
             .iter()
             .map(|p| (p.name.clone(), p.workspace_name.clone()))
             .collect();
-        assert_eq!(by_name.get("A").unwrap(), "jats-2");
-        assert_eq!(by_name.get("B").unwrap(), "jats-2");
-        assert_eq!(by_name.get("C").unwrap(), "orb");
+        assert_eq!(by_name.get("A").unwrap(), "alpha-2");
+        assert_eq!(by_name.get("B").unwrap(), "alpha-2");
+        assert_eq!(by_name.get("C").unwrap(), "beta");
 
         // Renaming to the same name is a no-op (returns 0 changes).
-        let count2 = store.rename_workspace("orb", "orb".into()).unwrap();
+        let count2 = store.rename_workspace("beta", "beta".into()).unwrap();
         assert_eq!(count2, 0);
 
         let _ = fs::remove_dir_all(&dir);
@@ -1352,25 +1352,25 @@ mod tests {
             settings: Mutex::new(ManagerSettings::default_for_paths(&paths)),
         };
 
-        // Three projects across two workspaces; alphabetical "jats" before "orb".
+        // Three projects across two workspaces; alphabetical "alpha" before "beta".
         store.add_project(AddProjectInput {
             name: "X".into(),
             project_path: "/p/x".into(),
-            workspace_name: "orb".into(),
+            workspace_name: "beta".into(),
         }).unwrap();
         store.add_project(AddProjectInput {
             name: "Y".into(),
             project_path: "/p/y".into(),
-            workspace_name: "jats".into(),
+            workspace_name: "alpha".into(),
         }).unwrap();
         store.add_project(AddProjectInput {
             name: "Z".into(),
             project_path: "/p/z".into(),
-            workspace_name: "jats".into(),
+            workspace_name: "alpha".into(),
         }).unwrap();
 
         let names = store.workspace_names_in_use();
-        assert_eq!(names, vec!["jats".to_string(), "orb".to_string()]);
+        assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
 
         let _ = fs::remove_dir_all(&dir);
     }

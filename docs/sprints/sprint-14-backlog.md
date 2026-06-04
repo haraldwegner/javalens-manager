@@ -18,7 +18,7 @@ Live smoke of the v0.14.0 manager UI surfaced three bugs + a feature ask + answe
 
 **Also in v0.14.1:**
 - **Help-page screenshot refresh** — after the rename + new checkbox, existing `public/help/settings-{top,bottom}.png` are stale. USER STEP for capture from `npx tauri dev`; agent updates `help.md` text. **v0.14.1 Stage 4.**
-- **Manager-side JATS scrub** — forward-only anonymize: remove proprietary trading platform references ("JATS" / "JATS-ORB-WS" / "ORB Strategy" / "trading strategy") from PUBLIC manager files (docs, sprint backlogs, release notes, code comments). No history rewrite. Fork-side scrub stays Sprint 15. **v0.14.1 Stage 5.**
+- **Manager-side doc-scrub** — forward-only anonymize: remove proprietary product-name references from PUBLIC manager files (docs, sprint backlogs, release notes, code comments). No history rewrite. Fork-side scrub stays Sprint 15. **v0.14.1 Stage 5.**
 
 **Answered standing questions (no work, just answers):**
 - *Repos in sync?* — Loosely coupled. Sprints 7–13 paired releases; Sprint 14 dropped the pattern (fork v1.7.2 cut). Each repo can ship at its own cadence now.
@@ -27,7 +27,7 @@ Live smoke of the v0.14.0 manager UI surfaced three bugs + a feature ask + answe
 - *Does autostart-on-boot start MCP processes too?* — No (before v0.14.1). v0.14.1 Feature #7 adds that as a separate opt-in flag.
 
 **Deferred to Sprint 15:**
-- JATS scrub of `javalens-mcp` (fork-side) — same playbook as manager Stage 5, separate repo.
+- Doc-scrub of `javalens-mcp` (fork-side) — same playbook as manager Stage 5, separate repo.
 - Gradle / Android read-only support (fork).
 - Target-candidate detection + multi-step orchestration framework (fork).
 - Fork bugs #6 / #7 (fork — whichever future release picks them up).
@@ -66,7 +66,7 @@ Predecessor: [`sprint-13-backlog.md`](sprint-13-backlog.md).
 ## Out of scope (settled)
 
 - Apple Developer signing / notarization for macOS builds — separate later track. v0.14.0 ships unsigned with documented `xattr` Gatekeeper bypass.
-- JATS doc-scrub across both repos — Sprint 15 candidate; deferred to keep Sprint 14 atomic.
+- Doc-scrub across both repos — Sprint 15 candidate; deferred to keep Sprint 14 atomic.
 - Gradle / Android read-only support, target-candidate detection, multi-step orchestration framework — Sprint 15 candidates from `docs/sprints/future-sprint-enhancements.md`.
 - Per-workspace settings UI; multi-window manager.
 - Configurable Reload-all timeout (default 30 s; configurable becomes a v0.14.x patch if reported).

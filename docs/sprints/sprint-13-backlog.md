@@ -13,7 +13,7 @@
 > ─────
 > Workspaces                (disabled header)
 >   ●  Javalens_WS          (toggle on click — bullet reflects phase)
->   ○  ORB_JATS_WS
+>   ○  BETA-WS
 > ─────
 > Start all services
 > Stop all services

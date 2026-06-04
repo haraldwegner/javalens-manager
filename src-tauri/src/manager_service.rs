@@ -2920,8 +2920,8 @@ mod tests {
 
     #[test]
     fn mcp_server_id_for_workspace_simple_name() {
-        let id = mcp_server_id_for_workspace("jats");
-        assert_eq!(id, "jl-jats");
+        let id = mcp_server_id_for_workspace("alpha");
+        assert_eq!(id, "jl-alpha");
     }
 
     #[test]
@@ -2968,7 +2968,7 @@ mod tests {
     fn mcp_server_id_for_workspace_distinguishes_distinct_names() {
         // Two different workspace names → two different ids. Otherwise
         // mcp.json would collapse independent workspaces into one entry.
-        let a = mcp_server_id_for_workspace("jats");
+        let a = mcp_server_id_for_workspace("alpha");
         let b = mcp_server_id_for_workspace("orb");
         assert_ne!(a, b);
     }

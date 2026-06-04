@@ -434,7 +434,7 @@ fn phase_glyph(phase: &RuntimePhase) -> &'static str {
 ///   ─────
 ///   Workspaces                (disabled header — only when ≥1 workspace)
 ///     ●  Javalens_WS          (toggle on click)
-///     ○  ORB_JATS_WS
+///     ○  BETA-WS
 ///   ─────
 ///   Start all services
 ///   Stop all services

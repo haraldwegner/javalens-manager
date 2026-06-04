@@ -26,7 +26,7 @@ Real signals — not hypotheticals:
 - **Cold-start cost is unacceptable.** Big workspaces (think: full enterprise monolith) take minutes to index. Pre-indexing on a server and connecting from many clients amortizes that cost.
 - **Compliance / centralization.** A team policy mandates that source code analysis runs in a controlled environment, not on individual developer laptops.
 
-If none of those exist, **don't build this.** The local stdio model fits the realistic single-developer use case (1-3 workspaces, big-but-bounded JATS-style projects, ~weekly add/remove events) and adds no friction.
+If none of those exist, **don't build this.** The local stdio model fits the realistic single-developer use case (1-3 workspaces, big-but-bounded multi-bundle Java projects, ~weekly add/remove events) and adds no friction.
 
 ## What it actually requires
 
@@ -108,9 +108,9 @@ What it is: serialize a workspace definition (project paths, settings, optional 
 
 Why it matters more in the networked direction:
 
-- **The "share with teammate" use case is the entire point of multi-user.** On a hosted deployment, a workspace preset becomes a *template*: "everyone joining the JATS workspace pulls these 12 OSGi bundles, with these analysis settings, against this target platform." That's a server-side resource, not a local file.
+- **The "share with teammate" use case is the entire point of multi-user.** On a hosted deployment, a workspace preset becomes a *template*: "everyone joining the RCP-product workspace pulls those OSGi bundles, with these analysis settings, against this target platform." That's a server-side resource, not a local file.
 - **Reproducibility.** CI / agent farms need declarative workspace specs, not click-through-the-UI configuration.
-- **Compliance.** A signed workspace template ("this is the approved JATS workspace shape") is something an org-policy environment will demand.
+- **Compliance.** A signed workspace template ("this is the approved workspace shape for our product") is something an org-policy environment will demand.
 
 The local single-developer use case (`cp ~/.cache/javalens-manager/workspaces/X` between two of your own machines) is a thin one — not worth shipping presets just for it.
 

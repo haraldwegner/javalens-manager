@@ -236,7 +236,7 @@ pub struct WorkspaceStatusSummary {
 ```
 Show
 ─────────────────────────
-[●] jats                       (per-workspace; click toggles start/stop)
+[●] alpha                      (per-workspace; click toggles start/stop)
 [●] internal-tools
 [○] legacy-suite
 ─────────────────────────

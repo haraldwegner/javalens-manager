@@ -76,7 +76,7 @@ Acceptance criteria:
   - [ ] `mcp__jl-11127-strategies-orb__get_project_structure` → `sourceFileCount` ≈ 104.
   - [ ] `mcp__jl-11127-strategies-orb__search_symbols query="SlotManager"` → ≥ 1 hit.
   - [ ] `mcp__jl-11125-execsim-java__get_project_structure` → file count unchanged (no regression on conventional Maven).
-  - [ ] One `jl-111xx-comjats2*` service → file count unchanged or higher (pure-Eclipse path works).
+  - [ ] One `jl-111xx-com.example.app*` service → file count unchanged or higher (pure-Eclipse path works).
 
 ## Phase 2 — Component 4: Configurable release URL in javalens-manager
 

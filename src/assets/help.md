@@ -22,7 +22,7 @@ For `.deb` packages or other formats, see the [GitHub Releases page](https://git
 
 A **workspace** is a named group of Java projects loaded into one JavaLens process and exposed to agents as **one MCP service** (`jl-<workspace-name>`). The agent sees the combined symbol set of every project in the workspace; cross-project navigation, find-references, and (in fork v1.4.0+) refactorings work across the whole group.
 
-- **One workspace per cohesive task.** A bundle/multi-module application (e.g. JATS with 12 OSGi bundles), a monorepo, or a single project that you want isolated — each gets its own workspace.
+- **One workspace per cohesive task.** A bundle/multi-module application (e.g. an Eclipse RCP product with 12 OSGi bundles), a monorepo, or a single project that you want isolated — each gets its own workspace.
 - **Live updates.** Add or remove a project from a workspace and the running JavaLens picks it up within ~1 second through a `workspace.json` file watcher. No MCP-client restart, no agent-session reload.
 - **No ports.** Workspaces are identified by name. There is no port range, no per-project port allocation, no port conflicts.
 - **Tool budget.** Each workspace contributes ~60 tools toward the agent's tool registration cap (Antigravity caps around 100). Stick to 1–3 active workspaces concurrently.
