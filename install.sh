@@ -15,11 +15,16 @@ install_macos() {
 
     mac_arch=$(uname -m)
     case "$mac_arch" in
-        x86_64)  dmg_arch="x64" ;;
         arm64)   dmg_arch="aarch64" ;;
+        x86_64)
+            echo "Error: Intel Macs are not supported."
+            echo "Apple stopped shipping Intel Macs in 2023; remaining hardware is six-plus years old."
+            echo "Workaround: install Rosetta 2 (softwareupdate --install-rosetta) and run the Apple Silicon .dmg via translation."
+            exit 1
+            ;;
         *)
             echo "Error: unsupported macOS arch '$mac_arch'."
-            echo "Supported: arm64 (Apple Silicon) and x86_64 (Intel)."
+            echo "Supported: arm64 (Apple Silicon)."
             exit 1
             ;;
     esac
