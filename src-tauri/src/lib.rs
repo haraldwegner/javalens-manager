@@ -256,6 +256,13 @@ pub fn run() {
                                 autolaunch.disable()
                             };
                             refresh_tray_menu(app_handle);
+                            // v0.14.1 (bugs.md #4): notify the frontend
+                            // that a backend-driven settings write just
+                            // happened, so the Settings UI reloads its
+                            // locally-cached Svelte variables. Payload
+                            // is unit — the listener just calls
+                            // getDashboard() to pull the fresh state.
+                            let _ = app_handle.emit("javalens://settings-changed", ());
                         }
                         "tray_quit" => {
                             if let Some(window) = app_handle.get_webview_window("main") {

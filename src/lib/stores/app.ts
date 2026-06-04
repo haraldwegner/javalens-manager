@@ -1,4 +1,5 @@
 import { writable } from "svelte/store";
+import { listen } from "@tauri-apps/api/event";
 import {
   addProject,
   cleanGeneratedData,
@@ -71,6 +72,10 @@ export function createAppStore() {
   let pollTimer: ReturnType<typeof setInterval> | undefined;
   let pollInFlight = false;
   let visibilityHandlerAttached = false;
+  /** v0.14.1 (bugs.md #4): track whether the Tauri event listener for
+   * backend-driven settings changes is registered. Idempotent — load()
+   * can be called multiple times. */
+  let settingsChangedListenerAttached = false;
 
   function syncDashboard(dashboard: ManagerDashboard) {
     update((state) => ({
@@ -96,6 +101,24 @@ export function createAppStore() {
     try {
       syncDashboard(await getDashboard());
       ensureStatusPolling();
+      // v0.14.1 (bugs.md #4): listen for backend-driven settings writes
+      // (e.g. tray "Autostart on boot" toggle) and reload the dashboard
+      // so the Settings UI reflects the new value. Idempotent — guarded
+      // by the flag above. Fire-and-forget; the listener lives for the
+      // app process's lifetime.
+      if (!settingsChangedListenerAttached) {
+        settingsChangedListenerAttached = true;
+        listen("javalens://settings-changed", async () => {
+          try {
+            syncDashboard(await getDashboard());
+          } catch (e) {
+            console.error("dashboard reload after settings-changed failed", e);
+          }
+        }).catch((e) => {
+          console.error("failed to attach settings-changed listener", e);
+          settingsChangedListenerAttached = false;
+        });
+      }
     } catch (error) {
       update((state) => ({
         ...state,
