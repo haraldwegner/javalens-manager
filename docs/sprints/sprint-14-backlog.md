@@ -4,9 +4,9 @@
 >
 > Sprint 13 closed 2026-04-29 with fork v1.7.0 (`fc25acf`) + manager v0.13.0 (native dynamic tray menu). Everything 2026-05-11 → 2026-05-19 (fork v1.7.1 `4465e09`, manager v0.13.1 `63d5d39`, install.sh aarch64 wrapper `7f1f7b7`, manager bugs.md tracker `f0bb7dc` → `1699550`) was incremental cleanup, NOT a sprint. Sprint 14 ran 2026-06-03 → 2026-06-04.
 
-## Post-ship findings (v0.14.0 smoke, 2026-06-04)
+## Post-ship findings (v0.14.0 smoke, 2026-06-04) — ✅ RESOLVED in v0.14.1
 
-Live smoke of the v0.14.0 manager UI surfaced three bugs + a feature ask + answered four standing questions. All addressed in the **v0.14.1 hotfix** (`~/.claude/plans/make-a-plan-happy-fern.md`).
+Live smoke of the v0.14.0 manager UI surfaced three bugs + a feature ask + answered four standing questions. All addressed in the **v0.14.1 hotfix** that shipped 2026-06-04 (`~/.claude/plans/make-a-plan-happy-fern.md`).
 
 **Bugs filed in [`docs/bugs.md`](../bugs.md):**
 - **#4** — Autostart on boot: tray and Settings checkbox out of sync after one-side toggle. Root cause: no backend → frontend event for settings-changed; tray-side toggle doesn't notify the Svelte store. Fix: emit `javalens://settings-changed` from the tray arm; frontend `listen()` reloads the dashboard. **v0.14.1 Stage 1.**

@@ -10,7 +10,7 @@ For each entry include: ID, date observed, severity, reproducer, expected vs act
 
 ## #7 — (feature) Auto-start workspaces on manager boot
 
-- **Status:** PLANNED for v0.14.1.
+- **Status:** SHIPPED in v0.14.1 (redesigned mid-cycle — commits `b9a0d66` then `f0b6c46`)
 - **Date raised:** 2026-06-04
 - **Reporter:** Harald, via v0.14.0 live smoke.
 - **Server version:** v0.14.0 (where `autostart_on_boot` shipped without auto-starting workspaces).
@@ -45,7 +45,7 @@ User feedback after seeing the two-checkbox UI ("Use system tray", "Autostart on
 
 ## #6 — "Data Root" card header doesn't reflect content
 
-- **Status:** OPEN
+- **Status:** FIXED in v0.14.1 (commit `8496116` — rename to "System Settings")
 - **Date observed:** 2026-06-04
 - **Reporter:** Harald, via v0.14.0 live smoke against the Settings page.
 - **Server version:** v0.14.0.
@@ -78,7 +78,7 @@ Rename to **"System Settings"** (decision 2026-06-04: simpler than splitting car
 
 ## #5 — Settings page wording "Machine-local runtime paths and port controls" still references ports
 
-- **Status:** OPEN
+- **Status:** FIXED in v0.14.1 (commit `8496116` — drop "port" from subtitle)
 - **Date observed:** 2026-06-04
 - **Reporter:** Harald, via v0.14.0 live smoke against the Settings page.
 - **Server version:** v0.14.0 (label has been wrong since Sprint 10 v0.10.4).
@@ -109,7 +109,7 @@ Change subtitle to "Machine-local runtime paths and controls." (drop "port"). Fi
 
 ## #4 — Autostart on boot — tray and Settings checkbox out of sync after one-side toggle
 
-- **Status:** OPEN
+- **Status:** FIXED in v0.14.1 (commit `d3e11cb` — backend emits `javalens://settings-changed`, frontend listens)
 - **Date observed:** 2026-06-04
 - **Reporter:** Harald, via v0.14.0 live smoke (tray menu vs Settings page).
 - **Server version:** v0.14.0 (the bug shipped with the two-UI-entry-point design from Sprint 14 Stage 4).
