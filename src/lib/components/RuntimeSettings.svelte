@@ -701,11 +701,11 @@
     <section class="panel stack settings-section machine-section">
       <div class="section-intro paired-section-intro">
         <h3>Machine Runtime Controls</h3>
-        <p class="muted">Machine-local runtime paths and port controls.</p>
+        <p class="muted">Machine-local runtime paths and controls.</p>
       </div>
       <div class="machine-controls-grid">
         <section class="machine-control-card compact-card stack">
-          <h4>Data Root</h4>
+          <h4>System Settings</h4>
           <label class="field">
             <span>Manager data root</span>
             <div class="field-row">
