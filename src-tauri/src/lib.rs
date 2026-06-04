@@ -315,24 +315,39 @@ pub fn run() {
                 };
             }
 
-            // v0.14.1 (bugs.md #7): if auto_start_workspaces_on_boot
-            // is set, kick off `start_all_runtimes` after a brief
-            // defer so the tray icon, main window, and event listeners
-            // are registered first. Spawns happen on a separate thread
-            // to keep the manager UI responsive while workspaces spin
-            // up (which can take minutes when there are many).
+            // v0.14.1 (bugs.md #7, redesign 2026-06-04): if
+            // autostart_on_boot is set, restore the workspaces that
+            // were running at last shutdown. "Running at last shutdown"
+            // = any project with phase Running | Starting | Failed in
+            // the persisted runtime-state.json. (Failed counts because
+            // it represents "user wanted this running; it died — retry
+            // on next launch".) Deferred ~2 s + separate thread so the
+            // tray icon, main window, and event listeners register
+            // first.
+            //
+            // If the user cleanly stopped everything via tray
+            // "Stop and Quit", the snapshot reflects Stopped → no
+            // restoration. If they Quit (or close-to-tray + Quit, or
+            // crash), the snapshot keeps the Running phases →
+            // restoration fires.
             if app
                 .state::<AppState>()
                 .manager_service
                 .get_settings()
-                .auto_start_workspaces_on_boot
+                .autostart_on_boot
             {
                 let app_handle = app.handle().clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_secs(2));
                     let state = app_handle.state::<AppState>();
-                    if let Err(error) = state.manager_service.start_all_runtimes() {
-                        eprintln!("auto-start workspaces failed: {error}");
+                    let workspaces = state.manager_service.workspaces_to_auto_restore();
+                    if workspaces.is_empty() {
+                        return;
+                    }
+                    if let Err(error) =
+                        state.manager_service.start_specific_workspaces(&workspaces)
+                    {
+                        eprintln!("auto-restore workspaces failed: {error}");
                     }
                 });
             }

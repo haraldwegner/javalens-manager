@@ -39,10 +39,10 @@ export interface ManagerSettings {
   dataRoot: string;
   globalRuntimeSource: RuntimeSource;
   useSystemTray: boolean;
-  /** Sprint 14 (v0.14.0): manager auto-launches at session login when true. */
+  /** Sprint 14 (v0.14.0): manager auto-launches at session login when true.
+   * v0.14.1 (bugs.md #7) extends the semantic: also restores the workspaces
+   * that were running at last shutdown. */
   autostartOnBoot: boolean;
-  /** v0.14.1 (bugs.md #7): manager runs start_all_runtimes after the UI is up when true; per-machine. */
-  autoStartWorkspacesOnBoot: boolean;
   mcpClientPaths: McpClientPaths;
   mcpMergeMode: McpMergeMode;
   mcpBackupBeforeWrite: boolean;
@@ -114,10 +114,10 @@ export interface UpdateSettingsInput {
   dataRoot: string;
   globalRuntimeSource: RuntimeSource;
   useSystemTray: boolean;
-  /** Sprint 14 (v0.14.0): manager auto-launches at session login when true. */
+  /** Sprint 14 (v0.14.0): manager auto-launches at session login when true.
+   * v0.14.1 (bugs.md #7) extends the semantic: also restores the workspaces
+   * that were running at last shutdown. */
   autostartOnBoot: boolean;
-  /** v0.14.1 (bugs.md #7): manager runs start_all_runtimes after the UI is up when true; per-machine. */
-  autoStartWorkspacesOnBoot: boolean;
   mcpClientPaths: McpClientPaths;
   mcpMergeMode: McpMergeMode;
   mcpBackupBeforeWrite: boolean;

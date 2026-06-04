@@ -165,9 +165,9 @@ If a probe fails, fix connectivity or runtime issues before relying on **Deploy 
 ### Machine Runtime Controls
 
 - **Manager data root** — Base directory for caches, logs, and JDT workspace indexes. Each workspace's data lives under `<data_root>/workspaces/<workspace-name>/` (which is also where `workspace.json` is written).
-- **Use system tray** — When enabled, closing the window keeps the manager running in the system tray. The tray menu (refined in v0.13.0) lets you drive workspace lifecycle without opening the window:
+- **Use system tray** — When enabled, closing the window keeps the manager running in the system tray. The tray menu (refined in v0.13.0; expanded in v0.14.0 / v0.14.1) lets you drive workspace lifecycle without opening the window:
 
-  ![Tray menu — Open dashboard, per-workspace rows with monochrome status bullets, Start all / Stop all / Quit](/help/tray-menu.png)
+  ![Tray menu — Open dashboard, per-workspace rows with monochrome status bullets, Start all / Reload all / Stop all services, Autostart on boot checkable, Quit](/help/tray-menu.png)
 
   - **Open dashboard** — raises the main manager window (its default view is the dashboard).
   - **Workspaces** — one row per workspace with a monochrome status bullet:
@@ -176,12 +176,14 @@ If a probe fails, fix connectivity or runtime issues before relying on **Deploy 
     - `○` stopped
     - `✗` failed
     Click a row to **toggle** that workspace: stopped/failed → start, running → stop. The bullet refreshes within ~1 s of any state change (rename in the dashboard, external `kill` of a javalens process, manual start/stop in the main window).
-  - **Start all services / Stop all services** — fan out across every loaded workspace.
+  - **Start all services** / **Reload all services** *(v0.14.0)* / **Stop all services** — fan out across every loaded workspace. *Reload all* is a sequenced stop-then-start (30 s deadline) — single click for a clean restart that doesn't race the shutdown sequence.
+  - **Autostart on boot** ✓ — checkable item (v0.14.0). When set, the manager auto-launches at session login. Synced with the **Settings → System Settings → Autostart on boot** checkbox in v0.14.1 — toggle from either surface and the other reflects within ~1 s.
   - **Quit** — opens the quit prompt.
 
   *Why monochrome bullets?* GNOME's `gnome-shell-extension-appindicator` strips per-menu-item images at the D-Bus boundary, so the colored status disks shipped in v0.12.0 never reached the user. Monochrome unicode shapes render in the menu's own font (1× line height) and survive the appindicator pipe across every Linux desktop we ship to.
 
   *Linux note:* the tray relies on a StatusNotifierItem / AppIndicator host. Pop!_OS, Ubuntu 22.04+, KDE / XFCE / Cinnamon / MATE work out of the box; vanilla GNOME (Fedora Workstation, Debian GNOME) needs `gnome-shell-extension-appindicator` installed once. See the [README](https://github.com/hw1964/javalens-manager#system-tray-on-linux) for distro-specific install commands.
+- **Autostart on boot** *(v0.14.0; expanded in v0.14.1)* — Start the manager automatically at session login AND restore the workspaces that were running at last shutdown. Per-OS plumbing for the manager launch: Linux writes `~/.config/autostart/*.desktop`, macOS registers a LaunchAgent, Windows touches the registry Run key. Default is opt-in (off). Mirrored in the tray menu as a checkable item — toggling from either surface updates the other (v0.14.1 added the event-driven sync). **Session restoration semantics:** if you Quit from the tray (or close-to-tray then Quit) the running workspaces stay marked Running in the manager's snapshot, and the next launch restores them ~2 s after the UI is up. If you choose **Stop and Quit**, every workspace is cleanly stopped — next launch starts none. Workspaces that were `Failed` at shutdown count as "user wanted this running" and get retried.
 - **Diagnostics** — Read-only summary: paths for the projects store, settings file, state directory, and resolved data root. **Workspaces** and **Project count** mirror the Dashboard totals, useful when reporting issues.
 - **Clean logs** — Removes manager runtime logs (workspaces and settings stay).
 - **Clean workspaces** — Removes JDT workspace caches (forces re-index next start).

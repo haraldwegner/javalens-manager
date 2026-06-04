@@ -20,20 +20,26 @@ For each entry include: ID, date observed, severity, reproducer, expected vs act
 
 Sprint 14's `autostart_on_boot` launches the manager UI at session login but doesn't also start the configured workspaces' javalens processes. The user has to click Start All (or per-project Start) after the manager appears. For machines configured as workspace hosts (dev laptops with persistent workspaces, server boxes), that defeats half the point of autostart.
 
-### Design (decision 2026-06-04)
+### Design (decision 2026-06-04) — **superseded later same day, see Redesign below**
 
 Add a single global flag `auto_start_workspaces_on_boot: bool` (default `false` — opt-in). Surfaced as one checkbox in the Settings page System Settings card, alongside the existing "Autostart on boot". When the flag is true, the manager's setup block runs `start_all_runtimes` after the UI is up (deferred ~2 s so tray + window register first; spawns happen on a separate thread so startup isn't blocked).
 
-Not in scope: per-workspace auto-start flags (would require workspace settings UI; can be added later if users ask). The global flag covers the common case.
+### Redesign (2026-06-04, after C3 smoke)
 
-### Why not also tray-toggle
+User feedback after seeing the two-checkbox UI ("Use system tray", "Autostart on boot", "Auto-start workspaces on boot"): the second checkbox is redundant. Autostart on boot should mean BOTH "manager launches at session login" AND "restore the workspaces that were running at last shutdown". Single flag, session-restoration semantics.
 
-The tray's "Autostart on boot" checkable is about *session-login behavior* (OS-level). Auto-start-workspaces is a *runtime behavior* triggered at manager start. Semantically distinct — keep them separate to avoid muddling the model.
+**Implementation:** drop the new `auto_start_workspaces_on_boot` field + the second checkbox. Expand the existing `autostart_on_boot` semantics: on every manager launch (not just OS autostart) when the flag is true, restore workspaces whose persisted runtime status is `Running | Starting | Failed` (`Failed` counts because it represents "user wanted this running; it died — retry"). The set is derived from the existing `runtime-state.json` per-project snapshot — no new persistence file.
+
+**Behavior:**
+- **Quit** (or close-to-tray + Quit, or crash) preserves the Running phases in the snapshot → next launch restores them.
+- **Stop and Quit** stops every workspace cleanly → snapshot reflects Stopped → next launch starts nothing.
+- A workspace that died externally (`kill -9`, OOM) shows `Failed` in the snapshot → next launch retries it.
 
 ### Cross-reference
 
 - Plan: `~/.claude/plans/make-a-plan-happy-fern.md` Stage 3.
 - Builds on v0.14.0's `autostart_on_boot` plumbing (commit `e472168`).
+- Original two-checkbox implementation: `b9a0d66` (shipped, then superseded by the redesign).
 
 ---
 

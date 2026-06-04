@@ -61,17 +61,6 @@ fn default_autostart_on_boot() -> bool {
     false
 }
 
-/// v0.14.1 (bugs.md #7): manager does NOT auto-start configured
-/// workspaces' javalens processes at launch by default — the user
-/// opts in via Settings > "Auto-start workspaces on boot". When true,
-/// the setup block runs `start_all_runtimes` after the UI is up
-/// (~2 s defer + separate thread). Independent of `autostart_on_boot`;
-/// fires on EVERY manager launch when set, regardless of how the
-/// manager was launched.
-fn default_auto_start_workspaces_on_boot() -> bool {
-    false
-}
-
 fn default_mcp_merge_mode() -> McpMergeMode {
     McpMergeMode::SafeMerge
 }
@@ -177,13 +166,6 @@ pub struct ManagerSettings {
     /// registry Run key). Surfaced in Settings AND as a tray checkable.
     #[serde(default = "default_autostart_on_boot")]
     pub autostart_on_boot: bool,
-    /// v0.14.1 (bugs.md #7): if true, the manager runs `start_all_runtimes`
-    /// after the UI is up (deferred ~2 s, on a separate thread) so
-    /// configured workspaces start automatically every time the
-    /// manager launches. Per-machine since `settings.json` is local.
-    /// Independent of `autostart_on_boot`.
-    #[serde(default = "default_auto_start_workspaces_on_boot")]
-    pub auto_start_workspaces_on_boot: bool,
     #[serde(default = "default_mcp_client_paths")]
     pub mcp_client_paths: McpClientPaths,
     #[serde(default = "default_mcp_merge_mode")]
@@ -225,7 +207,6 @@ impl ManagerSettings {
             global_runtime_source: RuntimeSource::Managed,
             use_system_tray: default_use_system_tray(),
             autostart_on_boot: default_autostart_on_boot(),
-            auto_start_workspaces_on_boot: default_auto_start_workspaces_on_boot(),
             mcp_client_paths: detect_default_mcp_client_paths(),
             mcp_merge_mode: default_mcp_merge_mode(),
             mcp_backup_before_write: default_mcp_backup_before_write(),
@@ -311,7 +292,6 @@ pub struct UpdateSettingsInput {
     pub global_runtime_source: RuntimeSource,
     pub use_system_tray: bool,
     pub autostart_on_boot: bool,
-    pub auto_start_workspaces_on_boot: bool,
     pub mcp_client_paths: McpClientPaths,
     pub mcp_merge_mode: McpMergeMode,
     pub mcp_backup_before_write: bool,
@@ -635,7 +615,6 @@ impl ConfigStore {
         settings.global_runtime_source = input.global_runtime_source;
         settings.use_system_tray = input.use_system_tray;
         settings.autostart_on_boot = input.autostart_on_boot;
-        settings.auto_start_workspaces_on_boot = input.auto_start_workspaces_on_boot;
         settings.mcp_client_paths = sanitize_mcp_client_paths(input.mcp_client_paths);
         settings.mcp_merge_mode = input.mcp_merge_mode;
         settings.mcp_backup_before_write = input.mcp_backup_before_write;
@@ -1332,27 +1311,6 @@ mod tests {
         // Renaming to the same name is a no-op (returns 0 changes).
         let count2 = store.rename_workspace("orb", "orb".into()).unwrap();
         assert_eq!(count2, 0);
-
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// v0.14.1 (bugs.md #7): the new `auto_start_workspaces_on_boot`
-    /// field defaults to false (opt-in) and round-trips through serde.
-    #[test]
-    fn manager_settings_auto_start_workspaces_on_boot_defaults_false_and_round_trips() {
-        let dir = unique_tempdir("auto-start-ws");
-        let paths = paths_in(&dir);
-
-        // Default is opt-in (false).
-        let defaults = ManagerSettings::default_for_paths(&paths);
-        assert!(!defaults.auto_start_workspaces_on_boot);
-
-        // Flip the flag, persist, re-read — survives round-trip.
-        let mut settings = defaults;
-        settings.auto_start_workspaces_on_boot = true;
-        write_json(&paths.settings_file, &settings).unwrap();
-        let reread = read_settings(&paths.settings_file, &paths).unwrap();
-        assert!(reread.auto_start_workspaces_on_boot);
 
         let _ = fs::remove_dir_all(&dir);
     }

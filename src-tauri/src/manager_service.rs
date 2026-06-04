@@ -696,6 +696,83 @@ impl ManagerService {
         self.config_store.set_autostart_on_boot(enabled)
     }
 
+    /// v0.14.1 (bugs.md #7, redesign 2026-06-04): collect the
+    /// `workspace_name`s of workspaces whose last persisted runtime
+    /// status was Running, Starting, or Failed. Called by the
+    /// `setup` block on every manager launch when `autostart_on_boot`
+    /// is set, to restore the user's session.
+    ///
+    /// Failed counts because it represents "user wanted this running;
+    /// it died" — on the next launch, retry. Stopped does NOT count
+    /// (user cleanly stopped → don't auto-restart on next launch).
+    pub fn workspaces_to_auto_restore(&self) -> HashSet<String> {
+        let mut workspaces = HashSet::new();
+        let projects = self.config_store.list_projects();
+        for project in &projects {
+            let reference = match self.resolve_runtime_reference(project) {
+                Ok(reference) => reference,
+                Err(_) => continue,
+            };
+            if let Ok(status) = self.runtime_manager.get_runtime_status(&reference) {
+                if matches!(
+                    status.phase,
+                    RuntimePhase::Running | RuntimePhase::Starting | RuntimePhase::Failed
+                ) {
+                    workspaces.insert(project.workspace_name.clone());
+                }
+            }
+        }
+        workspaces
+    }
+
+    /// v0.14.1 (bugs.md #7, redesign 2026-06-04): start runtimes for
+    /// only the workspaces named in `workspaces`. Same `workspace.json`
+    /// write + spawn shape as `start_all_runtimes`, just filtered.
+    /// Used by the startup-restore path.
+    pub fn start_specific_workspaces(
+        &self,
+        workspaces: &HashSet<String>,
+    ) -> Result<(), String> {
+        let projects = self.config_store.list_projects();
+        let mut workspaces_written: HashSet<String> = HashSet::new();
+        let mut errors = Vec::new();
+
+        // Write workspace.json once per distinct workspace we're restoring.
+        for project in &projects {
+            if !workspaces.contains(&project.workspace_name) {
+                continue;
+            }
+            if workspaces_written.insert(project.workspace_name.clone()) {
+                if let Err(e) = self.write_workspace_json_for(&project.workspace_name) {
+                    errors.push(format!("{}: {e}", project.workspace_name));
+                }
+            }
+        }
+
+        // Spawn (or join) each filtered project.
+        for project in projects {
+            if !workspaces.contains(&project.workspace_name) {
+                continue;
+            }
+            match self.resolve_launch_request(&project) {
+                Ok(launch_request) => {
+                    if let Err(error) = self.runtime_manager.start_runtime(&launch_request) {
+                        errors.push(format!("{}: {error}", project.name));
+                    }
+                }
+                Err(error) => errors.push(format!("{}: {error}", project.name)),
+            }
+        }
+
+        if !errors.is_empty() {
+            return Err(format!(
+                "auto-restore: some workspaces failed to start: {}",
+                errors.join(" | ")
+            ));
+        }
+        Ok(())
+    }
+
     /// Downloads or updates the JavaLens runtime.
     pub fn download_or_update_javalens(&self) -> Result<ManagerDashboard, String> {
         let mut settings = self.config_store.get_settings();
