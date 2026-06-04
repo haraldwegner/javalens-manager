@@ -41,6 +41,8 @@ export interface ManagerSettings {
   useSystemTray: boolean;
   /** Sprint 14 (v0.14.0): manager auto-launches at session login when true. */
   autostartOnBoot: boolean;
+  /** v0.14.1 (bugs.md #7): manager runs start_all_runtimes after the UI is up when true; per-machine. */
+  autoStartWorkspacesOnBoot: boolean;
   mcpClientPaths: McpClientPaths;
   mcpMergeMode: McpMergeMode;
   mcpBackupBeforeWrite: boolean;
@@ -114,6 +116,8 @@ export interface UpdateSettingsInput {
   useSystemTray: boolean;
   /** Sprint 14 (v0.14.0): manager auto-launches at session login when true. */
   autostartOnBoot: boolean;
+  /** v0.14.1 (bugs.md #7): manager runs start_all_runtimes after the UI is up when true; per-machine. */
+  autoStartWorkspacesOnBoot: boolean;
   mcpClientPaths: McpClientPaths;
   mcpMergeMode: McpMergeMode;
   mcpBackupBeforeWrite: boolean;

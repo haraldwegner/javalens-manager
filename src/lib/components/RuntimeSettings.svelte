@@ -67,6 +67,7 @@
   let dataRoot = "";
   let useSystemTray = true;
   let autostartOnBoot = false;
+  let autoStartWorkspacesOnBoot = false;
   let runtimeKind: "managed" | "localJar" = "managed";
   let localJarPath = "";
   let releaseRepo = "";
@@ -165,6 +166,7 @@
       globalRuntimeSource: nextSettings.globalRuntimeSource,
       useSystemTray: nextSettings.useSystemTray,
       autostartOnBoot: nextSettings.autostartOnBoot,
+      autoStartWorkspacesOnBoot: nextSettings.autoStartWorkspacesOnBoot,
       mcpClientPaths: nextSettings.mcpClientPaths,
       mcpMergeMode: nextSettings.mcpMergeMode,
       mcpBackupBeforeWrite: nextSettings.mcpBackupBeforeWrite,
@@ -208,6 +210,7 @@
           : { kind: "localJar", jarPath: (input.globalRuntimeSource as any).jarPath?.trim() ?? "" },
       useSystemTray: input.useSystemTray,
       autostartOnBoot: input.autostartOnBoot,
+      autoStartWorkspacesOnBoot: input.autoStartWorkspacesOnBoot,
       mcpClientPaths: normalizeMcpClientPaths(input.mcpClientPaths),
       mcpMergeMode: input.mcpMergeMode,
       mcpBackupBeforeWrite: input.mcpBackupBeforeWrite,
@@ -232,6 +235,7 @@
       dataRoot,
       useSystemTray,
       autostartOnBoot,
+      autoStartWorkspacesOnBoot,
       globalRuntimeSource:
         runtimeKind === "managed"
           ? {
@@ -298,6 +302,7 @@
     dataRoot = nextSettings.dataRoot;
     useSystemTray = nextSettings.useSystemTray;
     autostartOnBoot = nextSettings.autostartOnBoot;
+    autoStartWorkspacesOnBoot = nextSettings.autoStartWorkspacesOnBoot;
     runtimeKind = nextSettings.globalRuntimeSource.kind;
     mcpMergeMode = nextSettings.mcpMergeMode;
     mcpBackupBeforeWrite = nextSettings.mcpBackupBeforeWrite;
@@ -732,6 +737,10 @@
           <label class="checkbox-row compact" title="Start the manager automatically at session login (Linux ~/.config/autostart, macOS LaunchAgent, Windows registry)">
             <input bind:checked={autostartOnBoot} disabled={interactionDisabled} on:change={handleBoundEdit} type="checkbox" />
             <span>Autostart on boot</span>
+          </label>
+          <label class="checkbox-row compact" title="When set, the manager starts every configured workspace's javalens process after the UI is up (deferred 2 s, on a separate thread). Per-machine — settings.json is local.">
+            <input bind:checked={autoStartWorkspacesOnBoot} disabled={interactionDisabled} on:change={handleBoundEdit} type="checkbox" />
+            <span>Auto-start workspaces on boot</span>
           </label>
         </section>
 
