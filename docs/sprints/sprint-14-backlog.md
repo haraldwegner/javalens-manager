@@ -4,6 +4,34 @@
 >
 > Sprint 13 closed 2026-04-29 with fork v1.7.0 (`fc25acf`) + manager v0.13.0 (native dynamic tray menu). Everything 2026-05-11 → 2026-05-19 (fork v1.7.1 `4465e09`, manager v0.13.1 `63d5d39`, install.sh aarch64 wrapper `7f1f7b7`, manager bugs.md tracker `f0bb7dc` → `1699550`) was incremental cleanup, NOT a sprint. Sprint 14 ran 2026-06-03 → 2026-06-04.
 
+## Post-ship findings (v0.14.0 smoke, 2026-06-04)
+
+Live smoke of the v0.14.0 manager UI surfaced three bugs + a feature ask + answered four standing questions. All addressed in the **v0.14.1 hotfix** (`~/.claude/plans/make-a-plan-happy-fern.md`).
+
+**Bugs filed in [`docs/bugs.md`](../bugs.md):**
+- **#4** — Autostart on boot: tray and Settings checkbox out of sync after one-side toggle. Root cause: no backend → frontend event for settings-changed; tray-side toggle doesn't notify the Svelte store. Fix: emit `javalens://settings-changed` from the tray arm; frontend `listen()` reloads the dashboard. **v0.14.1 Stage 1.**
+- **#5** — Settings page wording "Machine-local runtime paths and **port** controls" still references ports. Ports gone since Sprint 10 v0.10.4 (workspace_name grouping replaced them with stdio transport). Fix: drop "port" from the subtitle. **v0.14.1 Stage 2.**
+- **#6** — "Data Root" card header doesn't reflect content (card also holds Use system tray + Autostart on boot, soon + Auto-start workspaces). Fix: rename to **"System Settings"** with vertical checkbox layout. **v0.14.1 Stage 2.**
+
+**Feature filed in [`docs/bugs.md`](../bugs.md):**
+- **#7** — Auto-start workspaces on manager boot. Today `autostart_on_boot` launches the manager UI only; workspaces stay stopped until user clicks Start All. New global flag `auto_start_workspaces_on_boot` defaults `false` (opt-in); when both flags true, setup-block runs `start_all_runtimes` after 2 s deferred + on a separate thread. **v0.14.1 Stage 3.**
+
+**Also in v0.14.1:**
+- **Help-page screenshot refresh** — after the rename + new checkbox, existing `public/help/settings-{top,bottom}.png` are stale. USER STEP for capture from `npx tauri dev`; agent updates `help.md` text. **v0.14.1 Stage 4.**
+- **Manager-side JATS scrub** — forward-only anonymize: remove proprietary trading platform references ("JATS" / "JATS-ORB-WS" / "ORB Strategy" / "trading strategy") from PUBLIC manager files (docs, sprint backlogs, release notes, code comments). No history rewrite. Fork-side scrub stays Sprint 15. **v0.14.1 Stage 5.**
+
+**Answered standing questions (no work, just answers):**
+- *Repos in sync?* — Loosely coupled. Sprints 7–13 paired releases; Sprint 14 dropped the pattern (fork v1.7.2 cut). Each repo can ship at its own cadence now.
+- *Where the fork's sprint doc goes?* — Fork uses `docs/bugs.md` + `docs/upgrade-checklist.md` + `docs/release-notes/v<X>.md`. If/when fork hits a sprint-shaped cycle, add `javalens-mcp/docs/sprints/sprint-N-backlog.md` mirroring the manager pattern.
+- *Port selection gone?* — Yes since v0.10.4 (Sprint 10). Legacy `ProjectRecord.assigned_port` kept for migration; ignored at runtime.
+- *Does autostart-on-boot start MCP processes too?* — No (before v0.14.1). v0.14.1 Feature #7 adds that as a separate opt-in flag.
+
+**Deferred to Sprint 15:**
+- JATS scrub of `javalens-mcp` (fork-side) — same playbook as manager Stage 5, separate repo.
+- Gradle / Android read-only support (fork).
+- Target-candidate detection + multi-step orchestration framework (fork).
+- Fork bugs #6 / #7 (fork — whichever future release picks them up).
+
 > **Detailed executable plan:** [`~/.claude/plans/make-a-plan-happy-fern.md`](../../../../.claude/plans/make-a-plan-happy-fern.md). This backlog is the design / intent narrative; the plan is what an agent executes (Stages 0–8, checkpoints C0–C8). If the plan and this backlog disagree, the plan wins — update both to keep the agreement.
 
 ## Goal

@@ -8,6 +8,150 @@ For each entry include: ID, date observed, severity, reproducer, expected vs act
 
 ---
 
+## #7 — (feature) Auto-start workspaces on manager boot
+
+- **Status:** PLANNED for v0.14.1.
+- **Date raised:** 2026-06-04
+- **Reporter:** Harald, via v0.14.0 live smoke.
+- **Server version:** v0.14.0 (where `autostart_on_boot` shipped without auto-starting workspaces).
+- **Severity:** N/A — feature request.
+
+### Rationale
+
+Sprint 14's `autostart_on_boot` launches the manager UI at session login but doesn't also start the configured workspaces' javalens processes. The user has to click Start All (or per-project Start) after the manager appears. For machines configured as workspace hosts (dev laptops with persistent workspaces, server boxes), that defeats half the point of autostart.
+
+### Design (decision 2026-06-04)
+
+Add a single global flag `auto_start_workspaces_on_boot: bool` (default `false` — opt-in). Surfaced as one checkbox in the Settings page System Settings card, alongside the existing "Autostart on boot". When the flag is true, the manager's setup block runs `start_all_runtimes` after the UI is up (deferred ~2 s so tray + window register first; spawns happen on a separate thread so startup isn't blocked).
+
+Not in scope: per-workspace auto-start flags (would require workspace settings UI; can be added later if users ask). The global flag covers the common case.
+
+### Why not also tray-toggle
+
+The tray's "Autostart on boot" checkable is about *session-login behavior* (OS-level). Auto-start-workspaces is a *runtime behavior* triggered at manager start. Semantically distinct — keep them separate to avoid muddling the model.
+
+### Cross-reference
+
+- Plan: `~/.claude/plans/make-a-plan-happy-fern.md` Stage 3.
+- Builds on v0.14.0's `autostart_on_boot` plumbing (commit `e472168`).
+
+---
+
+## #6 — "Data Root" card header doesn't reflect content
+
+- **Status:** OPEN
+- **Date observed:** 2026-06-04
+- **Reporter:** Harald, via v0.14.0 live smoke against the Settings page.
+- **Server version:** v0.14.0.
+- **Severity:** LOW — UX confusion; the card header narrows reader expectations to "data root only" when it also contains Use system tray + Autostart on boot.
+
+### Reproducer
+
+1. Open the manager → Settings.
+2. Scroll to Machine Runtime Controls.
+3. Notice the card titled "Data Root" actually contains: Manager data root field + Browse button + Use system tray checkbox + Autostart on boot checkbox.
+
+### Expected
+
+Card header reflects its contents.
+
+### Actual
+
+Header says "Data Root" but contains four controls covering data root + system tray + autostart-on-boot (+ v0.14.1 auto-start-workspaces).
+
+### Suggested fix
+
+Rename to **"System Settings"** (decision 2026-06-04: simpler than splitting cards; the four controls are all machine-local system settings). Keep vertical checkbox layout. The outer `<h3>Machine Runtime Controls</h3>` stays since it's the broader section header.
+
+### Cross-reference
+
+- Plan: `~/.claude/plans/make-a-plan-happy-fern.md` Stage 2.
+- File: `src/lib/components/RuntimeSettings.svelte` line ~708.
+
+---
+
+## #5 — Settings page wording "Machine-local runtime paths and port controls" still references ports
+
+- **Status:** OPEN
+- **Date observed:** 2026-06-04
+- **Reporter:** Harald, via v0.14.0 live smoke against the Settings page.
+- **Server version:** v0.14.0 (label has been wrong since Sprint 10 v0.10.4).
+- **Severity:** LOW — UX miscommunication; suggests a control that doesn't exist.
+
+### Reproducer
+
+1. Open the manager → Settings.
+2. Read the Machine Runtime Controls section subtitle.
+
+### Expected
+
+Subtitle describes only the controls actually present (data root + system tray + autostart).
+
+### Actual
+
+Subtitle reads: "Machine-local runtime paths and **port** controls." Port selection has not existed since Sprint 10 v0.10.4 — workspace_name grouping (stdio transport, one process per workspace) replaced per-project port binding. The legacy `ProjectRecord.assigned_port: u16` field is kept on disk for migration but is ignored at runtime; no UI surface for it.
+
+### Suggested fix
+
+Change subtitle to "Machine-local runtime paths and controls." (drop "port"). File: `src/lib/components/RuntimeSettings.svelte` line ~704.
+
+### Cross-reference
+
+- Plan: `~/.claude/plans/make-a-plan-happy-fern.md` Stage 2.
+
+---
+
+## #4 — Autostart on boot — tray and Settings checkbox out of sync after one-side toggle
+
+- **Status:** OPEN
+- **Date observed:** 2026-06-04
+- **Reporter:** Harald, via v0.14.0 live smoke (tray menu vs Settings page).
+- **Server version:** v0.14.0 (the bug shipped with the two-UI-entry-point design from Sprint 14 Stage 4).
+- **Severity:** MEDIUM — UX confusion; the manager's stated invariant ("Settings checkbox + tray checkable point at the same persisted setting") visibly fails for the user.
+
+### Reproducer
+
+Scenario A (tray → Settings stale):
+1. Open the manager + Settings page (loaded once; the dashboard is in memory).
+2. Toggle "Autostart on boot" from the tray menu — tray glyph flips.
+3. Without closing the manager, look at the Settings page checkbox.
+4. Observe: it still shows the PRE-toggle state.
+
+Scenario B (Settings → tray, ~1 s delay):
+1. Toggle "Autostart on boot" in Settings → Save.
+2. Look at the tray menu within 1 second.
+3. The tray checkmark MAY still show the pre-save state until the next 1-second cache-key poll picks it up.
+
+### Expected
+
+Either direction (tray ↔ Settings) updates the other within ~250 ms. Both surfaces always reflect the same persisted setting.
+
+### Actual
+
+Backend persists the setting correctly in both directions. The mismatch is in the frontend (Settings UI) which has a locally-cached `autostartOnBoot` Svelte variable populated at the last `getDashboard()` call. Toggling from the tray doesn't notify the frontend.
+
+For Scenario B (Settings → tray), the tray polls every 1 s with cache-key change detection (Sprint 14, `lib.rs:380`). The new value is picked up within 1 s — slightly slow but not visibly broken.
+
+### Suspected root cause
+
+The tray `on_menu_event` arm for `tray_autostart_on_boot` (lib.rs, Sprint 14 Stage 4) updates the persisted setting + reconciles OS-level autostart + refreshes the tray, but doesn't emit any event the frontend can subscribe to. The frontend has no mechanism to discover backend-driven settings changes outside of explicit `getDashboard()` calls.
+
+### Suggested fix
+
+Backend: after `set_autostart_on_boot()` in the tray arm, emit `javalens://settings-changed` via `app_handle.emit()` — mirror the `emit_quit_prompt_event` pattern already in `lib.rs`.
+
+Frontend: in `src/lib/stores/app.ts` `load()`, after the initial `getDashboard()`, register a `listen("javalens://settings-changed", ...)` callback that calls `getDashboard()` and `syncDashboard()`. Settings page Svelte variables update automatically via the existing reactive `applySettingsSnapshot` binding.
+
+Settings → tray direction is unchanged (1-second cache-key poll already picks up the backend change).
+
+### Cross-reference
+
+- Plan: `~/.claude/plans/make-a-plan-happy-fern.md` Stage 1.
+- File: `src-tauri/src/lib.rs` `tray_autostart_on_boot` arm.
+- File: `src/lib/stores/app.ts` `load()`.
+
+---
+
 ## #3 — Launching the app while already running spawns a second instance (and a second tray icon)
 
 - **Status:** FIXED in v0.14.0 (Sprint 14, commit `62cc728`) — `tauri-plugin-single-instance` v2.4.2 chained FIRST in the Tauri Builder; callback does `unminimize → show → set_focus` on the running process's `main` window. Duplicate process exits before any expensive setup.
