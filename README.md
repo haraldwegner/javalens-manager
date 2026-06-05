@@ -6,7 +6,7 @@ Desktop manager for running and orchestrating JavaLens MCP servers across multip
 
 ## Status
 
-**Beta (v0.14.1)**: `javalens-manager` is a fully functional desktop application on Linux (x86_64 and aarch64) and macOS (Apple Silicon only — unsigned, Gatekeeper bypass required). It supports named workspaces of multiple Java projects (each running as one shared JavaLens MCP service), live `workspace.json`-driven reconciliation, automatic fork-runtime download/update, and one-click deploy of MCP entries into Cursor / Claude Desktop / Antigravity / IntelliJ-style configs. The system-tray menu drives per-workspace lifecycle without opening the window; "Reload all" and "Autostart on boot" land in this release. Intel Mac and Windows builds aren't in scope; broader QA and cross-platform testing continue before a stable 1.0.
+**Beta (v0.14.1)**: `javalens-manager` is a fully functional desktop application on Linux (x86_64 and aarch64) and macOS (Apple Silicon only — unsigned, Gatekeeper bypass required). It supports named workspaces of multiple Java projects (each running as one shared JavaLens MCP service), live `workspace.json`-driven reconciliation, automatic fork-runtime download/update, and one-click deploy of MCP entries into Cursor / Claude Desktop / Antigravity / IntelliJ-style configs. The system-tray menu drives per-workspace lifecycle without opening the window; "Reload all" and "Autostart on boot" land in this release. Intel Macs aren't in scope (Apple Silicon only since v0.14.0). Windows builds (ARM + x64) land in Sprint 15 / v0.15.0. Broader QA and cross-platform testing continue before a stable 1.0.
 
 ### Version timeline
 
@@ -19,7 +19,7 @@ Desktop manager for running and orchestrating JavaLens MCP servers across multip
 
 - **v0.13.1** — packaging patch: GitHub release workflow now also builds for Linux **aarch64** on a free `ubuntu-22.04-arm` runner, so every tag publishes both `_amd64` and `_arm64` artifacts. `install.sh` now detects `uname -m` and pulls the matching AppImage automatically — the same `curl … | bash` works on x86_64 and ARM laptops/servers (verified on NVIDIA DGX Spark / GB10).
 - **v0.14.0** (Sprint 14) — hardening + features + Mac packaging. Three open manager bugs FIXED: #3 single-instance enforcement (`tauri-plugin-single-instance`), #2 process-death → Failed instead of Stopped (red `✗` glyph for external kill), #1 full fix for webview-blank-on-aarch64 (env-var baked into AppImage AppRun + .deb wrapper at CI build time, covers `dpkg -i` and direct-double-click install paths). New tray + dashboard feature: **Reload all** (sequenced stop-all → poll-until-stopped → start-all, 30 s deadline). New resident-service feature: **Autostart on boot** via `tauri-plugin-autostart`, surfaced as a Settings checkbox AND a checkable tray menu item. macOS packaging in CI (`macos-14` Apple Silicon only; Intel Macs unsupported — Apple stopped shipping them in 2023). install.sh gains a Darwin branch; README documents both Option A (curl one-liner) and Option B (DMG drag-drop) install paths plus the Gatekeeper bypass for unsigned builds.
-- **v0.14.1** (v0.14.x patch, hours after v0.14.0) — live-smoke fixes + one feature redesign. Three manager bugs FIXED: #4 settings ↔ tray sync (backend emits `javalens://settings-changed`; Svelte store listens), #5 drop "port" from the Settings Machine Runtime Controls subtitle (ports gone since v0.10.4), #6 rename "Data Root" card → **System Settings**. Feature #7 SHIPPED: **autostart-on-boot now also restores last-running workspaces** (Quit preserves them, Stop and Quit clears them, Failed retries). Help-page screenshots re-captured for the new System Settings card + Reload all + Autostart on boot. Manager-side doc-scrub of proprietary product-name references (forward-only anonymize; fork-side scrub stays Sprint 15).
+- **v0.14.1** (v0.14.x patch, hours after v0.14.0) — live-smoke fixes + one feature redesign. Three manager bugs FIXED: #4 settings ↔ tray sync (backend emits `javalens://settings-changed`; Svelte store listens), #5 drop "port" from the Settings Machine Runtime Controls subtitle (ports gone since v0.10.4), #6 rename "Data Root" card → **System Settings**. Feature #7 SHIPPED: **autostart-on-boot now also restores last-running workspaces** (Quit preserves them, Stop and Quit clears them, Failed retries). Help-page screenshots re-captured for the new System Settings card + Reload all + Autostart on boot. Manager-side doc-scrub of proprietary product-name references (forward-only anonymize; fork-side scrub shipped in fork v1.8.0 same day).
 
 See [`docs/release-notes/`](docs/release-notes/) for per-release detail.
 
@@ -54,8 +54,8 @@ Alternatively, you can download the `.deb` or `.AppImage` files manually from th
 If you launch the `.AppImage` manually, ensure it has executable permission first:
 
 ```bash
-chmod +x javalens-manager_0.14.0_amd64.AppImage   # or _aarch64 on ARM
-./javalens-manager_0.14.0_amd64.AppImage
+chmod +x javalens-manager_<version>_amd64.AppImage   # or _aarch64 on ARM
+./javalens-manager_<version>_amd64.AppImage
 ```
 
 ### macOS
@@ -152,9 +152,10 @@ This project exists to provide a higher-level desktop experience for people who 
 
 ## Planned
 
-- macOS and Windows packaging in CI.
+- Windows packaging in CI (Sprint 15 / v0.15.0 — ARM + x64, unsigned with SmartScreen-bypass docs).
 - Broader QA, cross-platform testing, and edge-case hardening.
 - Auto-update UX after the .AppImage download (currently the user replaces the binary by hand).
+- Scan-folder mode for Add Project (Sprint 15) — pick a parent directory (e.g. `~/Projects`); reuse the existing `WalkDir` + Java-project detection for a candidate list with checkbox-prune.
 
 ## Architecture Direction
 
@@ -179,10 +180,10 @@ If you need semantic Java analysis, navigation, refactoring, or diagnostics, tho
 ## Roadmap
 
 ### Current focus
-- Cross-platform packaging (macOS, Windows) in CI.
-- v1.6.1 fork release: Tycho-test fixture-build pipeline so the disabled `run_tests` happy-path tests run; cross-bundle `compile_workspace` integration test.
+- **Sprint 15 (v0.15.0)** — close manager bug #8 (auto-downloaded fork jar breaks deployed MCP client configs because the deployed `args` reference the versioned filename); Windows installer (ARM + x64); Scan-folder mode for Add Project. See [`docs/sprints/sprint-15-backlog.md`](docs/sprints/sprint-15-backlog.md).
 
 ### Completed (manager-side)
+- **Sprint 14 (v0.14.0 + v0.14.1, 2026-06-04):** Six manager bugs FIXED — #1 webview-blank-on-aarch64 (env-var baked into AppImage AppRun + .deb postinst, covers every install path); #2 process-death → `Failed` with red `✗` glyph; #3 `tauri-plugin-single-instance` (double-launch raises the existing window instead of spawning a second tray icon); #4 settings ↔ tray sync via `javalens://settings-changed`; #5 drop "port" from the Settings subtitle; #6 rename "Data Root" card → **System Settings**. New features: **Reload all** (sequenced stop-all → poll-until-stopped → start-all, 30 s deadline), **Autostart on boot** with session restoration (restores workspaces that were running at last shutdown — Quit preserves, Stop and Quit clears, `Failed` retries). macOS Apple Silicon packaging in CI (unsigned; Gatekeeper bypass documented). Manager-side doc-scrub of proprietary product-name references. Paired with [fork v1.8.0](https://github.com/hw1964/javalens-mcp/releases/tag/v1.8.0): **9 fork bugs FIXED**, three new tools (`refresh_workspace`, `find_duplicate_code`, FQN overload extending the `find_*` family), Gradle path for the Ring 3 dep tools — **75 tools per service**.
 - **Sprint 13 (v0.13.0):** Tray menu refined for the GNOME / AppIndicator reality (monochrome unicode bullets, `Open dashboard` opens the main window, single-second polling with cache-keyed change detection — no flicker, name-after-rename bug fixed). Paired with fork v1.7.0 (73 tools per service: Ring 2 codegen, Ring 3 Maven dep management, Ring 4 formatter / workflow polish).
 - **Sprint 12 (v0.12.0):** Tray menu lifecycle controls — per-workspace toggle entries, Start all / Stop all, 5-second background refresh.
 - **Sprint 11 (v0.11.0–v0.11.1):** Cutover for fork v1.5.0–v1.5.2 (Tycho-aware Maven, workspace bundle pool for `Require-Bundle`, Gradle Tooling API, parametric tool consolidation, JDT-LTK structural refactorings).
@@ -197,12 +198,10 @@ If you need semantic Java analysis, navigation, refactoring, or diagnostics, tho
 
 ## Tech Stack
 
-Planned stack:
-
 - Tauri
-- Rust
-- desktop frontend UI
-- upstream `javalens-mcp`
+- Rust (backend, runtime orchestration)
+- Svelte desktop frontend UI
+- upstream `javalens-mcp` (Eclipse JDT–driven Java analysis)
 
 ## Development
 
