@@ -26,7 +26,7 @@ Ship **manager v0.15.0** as Latest on GitHub. Close [`docs/bugs.md`](../bugs.md)
    - Linux amd64 ✓ (since v0.13.0)
    - Linux arm64 ✓ (since v0.13.1)
    - macOS Apple Silicon ✓ (since v0.14.0, unsigned)
-   - macOS Intel ✓ (since v0.14.0, unsigned) — **NOT touched this sprint**; signing remains separate later track.
+   - macOS Intel — **explicitly NOT supported.** Apple stopped shipping Intel Macs in 2023; Sprint 14 shipped Apple Silicon only. Intel-Mac users can install Rosetta 2 (`softwareupdate --install-rosetta`) and run the Apple Silicon `.dmg` via translation if needed.
    - **Windows x64 (NEW)** — unsigned, SmartScreen bypass documented.
    - **Windows ARM (NEW)** — unsigned, SmartScreen bypass documented.
 
@@ -46,7 +46,7 @@ Ship **manager v0.15.0** as Latest on GitHub. Close [`docs/bugs.md`](../bugs.md)
 
 ## Out of scope (settled)
 
-- macOS Intel signing — separate later track, same as Sprint 14.
+- macOS Intel builds — explicitly NOT in scope, same as Sprint 14. Apple Silicon only on the macOS side. Intel-Mac users run via Rosetta 2 if needed.
 - Windows code-signing certificate — separate later track.
 - Fork-side work — the v1.8.x backlog items in [`javalens-mcp/docs/upgrade-checklist.md`](https://github.com/hw1964/javalens-mcp/blob/master/docs/upgrade-checklist.md) (M2E-resolved classpath, `copy_class` / `wrap_class` strangler-fig, HTTP/SSE transport, `pre_edit_impact`, raise `find_references` truncation cap, Buildship target-platform integration, `move_class` javadoc `@link` import filter) ship under whichever future fork release picks them up. **Sprint 15 is manager-only.**
 - Sprint 14a refactor-tools-must-apply policy retrofit (fork v1.9.0) — independent of Sprint 15.
