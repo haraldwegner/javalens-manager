@@ -8,6 +8,47 @@ For each entry include: ID, date observed, severity, reproducer, expected vs act
 
 ---
 
+## #8 — MCP client configs reference versioned jar path; auto-downloaded new jar breaks the deployed service until re-deployed
+
+- **Status:** OPEN
+- **Date observed:** 2026-06-04 (fork v1.8.0 publish — manager's release-poller auto-downloaded the new jar, but MCP service entries deployed to Cursor / Claude / Antigravity / Claude Desktop still referenced the v1.7.1 jar path and failed to spawn).
+- **Reporter:** Harald, via v0.14.1 live smoke after fork v1.8.0 shipped.
+- **Server version:** v0.14.1.
+- **Severity:** MEDIUM — defeats the "polls for fork releases and downloads the latest jar automatically" UX promise. Every fork release requires the user to remember to re-run Deploy to agents per MCP client, or the deployed entries point at the prior jar file (now removed by the auto-download) and fail "file not found" on the next agent session.
+
+### Reproducer
+
+1. Manager has the v1.7.1 fork jar installed; MCP service entries deployed to one or more clients. Deployed `args` reference a versioned jar path (`javalens-v1.7.1.jar` or similar — the filename embeds the version).
+2. Fork ships v1.8.0; manager's release-poller auto-downloads `javalens-v1.8.0.jar` and replaces the on-disk jar.
+3. Open an MCP client (Cursor / Claude / Antigravity) and start a session.
+4. Client tries to spawn the server with the recorded `args` → "no such file or directory" (the v1.7.1 jar is gone).
+5. Workaround: open the manager → Deploy to agents per client → entries rewrite with the new `javalens-v1.8.0.jar` path → client works again, until the next release.
+
+### Expected
+
+After auto-download, the deployed MCP client entries continue to work without manual re-deploy.
+
+### Actual
+
+Deployed entries hard-code the versioned jar filename. The auto-download replaces the jar but leaves the deployed entries pointing at the old (now-missing) one. The "polls for releases and downloads the latest jar automatically" headline promise breaks the moment a new fork release ships.
+
+### Suggested fix
+
+Two reasonable directions:
+
+**Option A — stable filename + symlink (smallest fix).** Land the auto-downloaded jar as a stable name (`javalens.jar`) plus a versioned copy or symlink for diagnostics (`javalens-v1.8.0.jar -> javalens.jar`). MCP client `args` always reference `javalens.jar`; the symlink chain handles version diagnostics without baking the version into deployed config. Existing deployments need a one-shot re-deploy after the manager rolls out this fix, but subsequent auto-downloads stop breaking them.
+
+**Option B — auto-redeploy after download.** When the release-poller downloads a new jar, automatically re-run the deploy step for every previously-deployed MCP client (those whose deployed config still references the old path). No user action required. More complex (needs to track which clients were deployed-to + tolerate write failures), but matches the set-and-forget UX promise even for clients whose config the user no longer touches.
+
+Option A is the smaller, more durable change. Option B layers cleanly on top if needed.
+
+### Cross-reference
+
+- Triggered by fork v1.8.0 release (2026-06-04, commit `ffa68c7` in `hw1964/javalens-mcp`).
+- Companion features: release-poller (auto-download), Deploy to agents (per-client MCP config writer).
+
+---
+
 ## #7 — (feature) Auto-start workspaces on manager boot
 
 - **Status:** SHIPPED in v0.14.1 (redesigned mid-cycle — commits `b9a0d66` then `f0b6c46`)
