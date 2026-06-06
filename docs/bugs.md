@@ -8,6 +8,76 @@ For each entry include: ID, date observed, severity, reproducer, expected vs act
 
 ---
 
+## #9 — Deployed MCP stdio entries leak per-session JVMs; 16 javalens processes accumulate (~24 GB RSS) across MCP client sessions
+
+- **Status:** OPEN
+- **Date observed:** 2026-06-06 (live process inspection while wondering where ~40 GB of system RAM had gone — javalens.jar accounted for 24.3 GB across 16 JVMs).
+- **Reporter:** Harald.
+- **Server version:** v0.14.1 (manager process NOT running at observation time — no tray icon, autostart-on-boot unchecked).
+- **Severity:** HIGH — eats user-visible system memory at scale. Every Claude / Cursor window across a working day stacks another generation of JVMs at ~1.5 GB RSS each; on a 64-GB workstation 24 GB unaccounted for is a "where did my memory go?" leak, not a subtle slowdown.
+
+### Reproducer
+
+1. Manager has deployed MCP entries (stdio transport) for two workspaces — e.g. `jl-jats-orb-ws` and `jl-javalens-ws`. Each entry's `args` references the deployed jar path.
+2. Manager process is NOT running (autostart-on-boot unchecked; no tray icon visible).
+3. Open Claude (or Cursor) — the MCP client spawns a fresh pair of `javalens.jar` JVMs (one per deployed workspace).
+4. Close that window or open a NEW Claude / Cursor window → another pair spawns; the previous pair doesn't reap.
+5. Repeat across a working day → 16+ JVMs alive at ~1.5 GB RSS each = ~24 GB lost to leaked MCP servers.
+
+### Observed (2026-06-06)
+
+```
+=== 16 javalens.jar JVMs alive ===
+pid=10744   ppid=10552 (claude)   start=Jun 6 17:58:11
+pid=10747   ppid=10552 (claude)   start=Jun 6 17:58:12
+pid=12105   ppid=6531  (cursor)   start=Jun 6 17:58:16
+pid=12118   ppid=6531  (cursor)   start=Jun 6 17:58:16
+pid=12822   ppid=12606 (claude)   start=Jun 6 17:58:20
+pid=12832   ppid=12606 (claude)   start=Jun 6 17:58:20
+pid=22012   ppid=6555  (cursor)   start=Jun 6 17:59:03
+pid=22015   ppid=6555  (cursor)   start=Jun 6 17:59:03
+pid=22215   ppid=21942 (claude)   start=Jun 6 17:59:04
+pid=22242   ppid=21942 (claude)   start=Jun 6 17:59:04
+pid=25386   ppid=25205 (claude)   start=Jun 6 17:59:30
+pid=25395   ppid=25205 (claude)   start=Jun 6 17:59:30
+pid=26461   ppid=26274 (claude)   start=Jun 6 17:59:44
+pid=26475   ppid=26274 (claude)   start=Jun 6 17:59:44
+pid=27352   ppid=27119 (claude)   start=Jun 6 17:59:57
+pid=27362   ppid=27119 (claude)   start=Jun 6 17:59:58
+```
+
+**8 distinct parent processes** — 6 claude + 2 cursor MCP-client sessions — each holding **2 javalens.jar JVMs** (one per deployed workspace). All parents still alive (no reparenting to PID 1), so this isn't an orphan / forking bug — it's the stdio MCP "one server JVM per client session" model accumulating across the day.
+
+### Expected
+
+Either:
+
+- **(A) Manager coordinates** — one JVM per workspace, hosted; deployed entries connect to it. The current stdio model can't do this; each client spawns its own. HTTP/SSE transport (already on the fork's v1.8.x backlog) is the durable fix.
+- **(B) Parent connection close → server JVM exits cleanly.** If the MCP client connection drops (window closed), the spawned JVM should detect closed stdio and self-terminate. Today either javalens isn't detecting it, or the MCP clients hold the server resident across sessions instead of closing on window close.
+
+### Actual
+
+Each new client window spawns a fresh pair of JVMs (~1.5 GB RSS each). They stay alive even when the client closes the conversation (parent process continues, holding the stdio). 16+ accumulate over a day; ~24 GB total RSS.
+
+### Suggested fix
+
+Three reasonable paths:
+
+**Path 1 — HTTP/SSE transport (already on fork's v1.8.x backlog).** Manager runs one JVM per workspace, hosted; deployed MCP entries connect by URL instead of spawning. Single instance per workspace, no per-session duplication. Also resolves the sandbox / lock-contention issues from fork v1.7.1 #5 Option B. **Best long-term fix.**
+
+**Path 2 — Manager-side reaping.** Manager periodically scans for duplicate `javalens.jar` JVMs (same workspace, multiple instances, idle stdio for N minutes) and SIGTERMs the stale ones. Workaround until Path 1 lands. **Caveat: depends on the manager actually running** — autostart-on-boot off makes this a non-starter for users who don't keep the manager resident.
+
+**Path 3 — Fork-side stdio-watchdog.** Each spawned `javalens.jar` JVM watches its stdio peer; idle-for-N-minutes + stdin EOF arrival → self-exit. Self-reaping without depending on the manager being up or the transport rewrite. Smallest reachable change with the broadest impact.
+
+Path 3 is the cheapest unblock. Path 1 is the durable architectural fix.
+
+### Cross-reference
+
+- Companion fork-side item: HTTP/SSE transport in `javalens-mcp/docs/upgrade-checklist.md` "Sprint 15+ backlog" — Path 1 above. Sprint 14 deferred it.
+- Manager observation context: tray icon NOT visible at time of observation (manager process not running); autostart-on-boot unchecked. The leak accumulated entirely on the MCP-client side; manager-side reaping (Path 2) couldn't have helped.
+
+---
+
 ## #8 — MCP client configs reference versioned jar path; auto-downloaded new jar breaks the deployed service until re-deployed
 
 - **Status:** OPEN
