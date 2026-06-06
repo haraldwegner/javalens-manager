@@ -60,7 +60,7 @@ pid=27362   ppid=27119 (claude)   start=Jun 6 17:59:58
 
 ### Suggested fix
 
-**Primary — shared HTTP/SSE server mode.** Manager runs one javalens JVM per workspace as a resident service; deployed MCP entries connect to it by URL instead of spawning their own private stdio child. N clients × M workspaces → just **M JVMs total**, not N × M. This is the architectural fix that makes the issue *impossible*: stdio's per-client spawn behavior is the proximate cause, the right answer is to stop using stdio for the multi-client scenario this product is built for. Already on the fork's v1.8.x backlog as **HTTP/SSE transport** ([`javalens-mcp/docs/upgrade-checklist.md`](https://github.com/hw1964/javalens-mcp/blob/master/docs/upgrade-checklist.md), Sprint 15+ backlog section) — promote from "backlog" to "ships next". Also resolves the sandbox / lock-contention issues from fork v1.7.1 #5 Option B; this bug is the third independent reason to do it.
+**Primary — shared HTTP/SSE server mode.** Manager runs one javalens JVM per workspace as a resident service; deployed MCP entries connect to it by URL instead of spawning their own private stdio child. N clients × M workspaces → just **M JVMs total**, not N × M. This is the architectural fix that makes the issue *impossible*: stdio's per-client spawn behavior is the proximate cause, the right answer is to stop using stdio for the multi-client scenario this product is built for. A scaffold sprint already exists: [`javalens-mcp/docs/sprints/sprint-future-http-sse-transport.md`](https://github.com/hw1964/javalens-mcp/blob/master/docs/sprints/sprint-future-http-sse-transport.md) — surfaced 2026-05-17 during EXECSIM Session 2 with the **original motivation being sandbox unblock** (Antigravity / Cursor sandboxes can't spawn arbitrary stdio children). This bug adds the **shared-service / leak-prevention angle as a second independent motivation** that bumps priority — the scaffold was sequenced "likely Sprint 16+", but with two motivations now it deserves promotion.
 
 **Secondary (until shared mode lands) — honor `autostartOnBoot` in the MCP-config writer.** When the setting is off:
 
@@ -71,7 +71,7 @@ pid=27362   ppid=27119 (claude)   start=Jun 6 17:59:58
 
 ### Cross-reference
 
-- Fork v1.8.x backlog: **HTTP/SSE transport** in `javalens-mcp/docs/upgrade-checklist.md`. This bug bumps the priority.
+- Fork sprint scaffold: [`sprint-future-http-sse-transport.md`](https://github.com/hw1964/javalens-mcp/blob/master/docs/sprints/sprint-future-http-sse-transport.md) — originally surfaced 2026-05-17 for the sandbox-unblock motivation; this bug adds the shared-service / leak-prevention angle and bumps priority. Also mentioned in [`javalens-mcp/docs/upgrade-checklist.md`](https://github.com/hw1964/javalens-mcp/blob/master/docs/upgrade-checklist.md) "Sprint 15+ backlog" as a v1.8.x follow-up.
 - Manager state at observation: process not running, no tray icon, `autostartOnBoot: false` in settings. The leak accumulated entirely because the deployed MCP entries continued to dispatch on client startup.
 
 ---
