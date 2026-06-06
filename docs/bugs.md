@@ -8,21 +8,31 @@ For each entry include: ID, date observed, severity, reproducer, expected vs act
 
 ---
 
-## #9 — Deployed MCP stdio entries leak per-session JVMs; 16 javalens processes accumulate (~24 GB RSS) across MCP client sessions
+## #9 — `autostartOnBoot: false` does not prevent javalens MCP servers from auto-starting
 
 - **Status:** OPEN
-- **Date observed:** 2026-06-06 (live process inspection while wondering where ~40 GB of system RAM had gone — javalens.jar accounted for 24.3 GB across 16 JVMs).
+- **Date observed:** 2026-06-06
 - **Reporter:** Harald.
-- **Server version:** v0.14.1 (manager process NOT running at observation time — no tray icon, autostart-on-boot unchecked).
-- **Severity:** HIGH — eats user-visible system memory at scale. Every Claude / Cursor window across a working day stacks another generation of JVMs at ~1.5 GB RSS each; on a 64-GB workstation 24 GB unaccounted for is a "where did my memory go?" leak, not a subtle slowdown.
+- **Environment:** javalens-manager v0.14.1 (settings at `~/.config/javalens-manager/settings.json`), javalens-mcp v1.8.0, Cursor + Claude Code extension, Pop!_OS 22.04.
+- **Severity:** HIGH — 7 concurrent Claude / Cursor sessions → 16 `javalens.jar` JVMs at ~1.5 GB RSS each → **~24 GB RAM** lost to MCP servers the user explicitly opted OUT of auto-starting. On a 64-GB workstation that's a "where did my memory go?" leak, not a subtle slowdown.
 
-### Reproducer
+### Setting
 
-1. Manager has deployed MCP entries (stdio transport) for two workspaces — e.g. `jl-jats-orb-ws` and `jl-javalens-ws`. Each entry's `args` references the deployed jar path.
-2. Manager process is NOT running (autostart-on-boot unchecked; no tray icon visible).
-3. Open Claude (or Cursor) — the MCP client spawns a fresh pair of `javalens.jar` JVMs (one per deployed workspace).
-4. Close that window or open a NEW Claude / Cursor window → another pair spawns; the previous pair doesn't reap.
-5. Repeat across a working day → 16+ JVMs alive at ~1.5 GB RSS each = ~24 GB lost to leaked MCP servers.
+```json
+{ "autostartOnBoot": false }
+```
+
+### Expected
+
+With autostart disabled, javalens servers should not launch automatically.
+
+### Actual
+
+`javalens-manager` leaves its MCP registrations (`jl-jats-orb-ws`, `jl-javalens-ws`) active in `~/.cursor/mcp.json` and `~/.claude.json` with no `disabled` flag. Every MCP client (each Cursor window, each Claude Code session) therefore auto-spawns both servers on startup.
+
+### Root cause
+
+The autostart toggle governs only the manager's own boot launch; it is decoupled from the MCP server registrations it writes. The MCP-config writer doesn't consult `autostartOnBoot` when deciding whether to write entries enabled or disabled — once a workspace has been Deployed-to-agents, the registration persists active regardless of the global autostart preference.
 
 ### Observed (2026-06-06)
 
@@ -46,35 +56,23 @@ pid=27352   ppid=27119 (claude)   start=Jun 6 17:59:57
 pid=27362   ppid=27119 (claude)   start=Jun 6 17:59:58
 ```
 
-**8 distinct parent processes** — 6 claude + 2 cursor MCP-client sessions — each holding **2 javalens.jar JVMs** (one per deployed workspace). All parents still alive (no reparenting to PID 1), so this isn't an orphan / forking bug — it's the stdio MCP "one server JVM per client session" model accumulating across the day.
-
-### Expected
-
-Either:
-
-- **(A) Manager coordinates** — one JVM per workspace, hosted; deployed entries connect to it. The current stdio model can't do this; each client spawns its own. HTTP/SSE transport (already on the fork's v1.8.x backlog) is the durable fix.
-- **(B) Parent connection close → server JVM exits cleanly.** If the MCP client connection drops (window closed), the spawned JVM should detect closed stdio and self-terminate. Today either javalens isn't detecting it, or the MCP clients hold the server resident across sessions instead of closing on window close.
-
-### Actual
-
-Each new client window spawns a fresh pair of JVMs (~1.5 GB RSS each). They stay alive even when the client closes the conversation (parent process continues, holding the stdio). 16+ accumulate over a day; ~24 GB total RSS.
+**8 distinct parent processes** (6 claude + 2 cursor MCP-client sessions) × 2 deployed workspaces = 16 JVMs. Stdio MCP transport spawns one private server JVM per client process per workspace; deployments **don't share**. All parents alive, no reparenting — not a forking bug, just stdio's "one JVM per client per workspace" model multiplying because the registrations stay active.
 
 ### Suggested fix
 
-Three reasonable paths:
+**Primary — shared HTTP/SSE server mode.** Manager runs one javalens JVM per workspace as a resident service; deployed MCP entries connect to it by URL instead of spawning their own private stdio child. N clients × M workspaces → just **M JVMs total**, not N × M. This is the architectural fix that makes the issue *impossible*: stdio's per-client spawn behavior is the proximate cause, the right answer is to stop using stdio for the multi-client scenario this product is built for. Already on the fork's v1.8.x backlog as **HTTP/SSE transport** ([`javalens-mcp/docs/upgrade-checklist.md`](https://github.com/hw1964/javalens-mcp/blob/master/docs/upgrade-checklist.md), Sprint 15+ backlog section) — promote from "backlog" to "ships next". Also resolves the sandbox / lock-contention issues from fork v1.7.1 #5 Option B; this bug is the third independent reason to do it.
 
-**Path 1 — HTTP/SSE transport (already on fork's v1.8.x backlog).** Manager runs one JVM per workspace, hosted; deployed MCP entries connect by URL instead of spawning. Single instance per workspace, no per-session duplication. Also resolves the sandbox / lock-contention issues from fork v1.7.1 #5 Option B. **Best long-term fix.**
+**Secondary (until shared mode lands) — honor `autostartOnBoot` in the MCP-config writer.** When the setting is off:
 
-**Path 2 — Manager-side reaping.** Manager periodically scans for duplicate `javalens.jar` JVMs (same workspace, multiple instances, idle stdio for N minutes) and SIGTERMs the stale ones. Workaround until Path 1 lands. **Caveat: depends on the manager actually running** — autostart-on-boot off makes this a non-starter for users who don't keep the manager resident.
+- **(a)** Don't write the entries at all (remove them on toggle-off, add them on toggle-on), OR
+- **(b)** Write them with `disabled: true` / `enabled: false` per the client's MCP-config schema (Cursor and Claude both honor a disabled flag).
 
-**Path 3 — Fork-side stdio-watchdog.** Each spawned `javalens.jar` JVM watches its stdio peer; idle-for-N-minutes + stdin EOF arrival → self-exit. Self-reaping without depending on the manager being up or the transport rewrite. Smallest reachable change with the broadest impact.
-
-Path 3 is the cheapest unblock. Path 1 is the durable architectural fix.
+(a) is cleaner UX (entries disappear from the client's MCP list — explicit). (b) is less disruptive (the entry stays visible but inert, easy for the user to toggle without re-deploying). Either way, the autostart toggle should mean what it says.
 
 ### Cross-reference
 
-- Companion fork-side item: HTTP/SSE transport in `javalens-mcp/docs/upgrade-checklist.md` "Sprint 15+ backlog" — Path 1 above. Sprint 14 deferred it.
-- Manager observation context: tray icon NOT visible at time of observation (manager process not running); autostart-on-boot unchecked. The leak accumulated entirely on the MCP-client side; manager-side reaping (Path 2) couldn't have helped.
+- Fork v1.8.x backlog: **HTTP/SSE transport** in `javalens-mcp/docs/upgrade-checklist.md`. This bug bumps the priority.
+- Manager state at observation: process not running, no tray icon, `autostartOnBoot: false` in settings. The leak accumulated entirely because the deployed MCP entries continued to dispatch on client startup.
 
 ---
 
