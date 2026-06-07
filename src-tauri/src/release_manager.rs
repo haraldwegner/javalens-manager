@@ -396,19 +396,18 @@ impl ReleaseManager {
 
         let jar_relative_path = find_relative_jar_path(&extract_root)?;
 
-        // Delete any existing javalens-* directories to enforce a single cached runtime
-        if let Ok(entries) = fs::read_dir(&tools_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                        if name.starts_with("javalens-") {
-                            let _ = fs::remove_dir_all(&path);
-                        }
-                    }
-                }
-            }
-        }
+        // Sprint 15 Stage 8 (bug #8): the install sequence is now ordered so
+        // that the `current` symlink swap is the atomic commit point. Any
+        // reader of the stable jar path (deploy writer, resident-JVM spawner
+        // in Stage 10) sees EITHER the old version OR the new one, never a
+        // dangling path.
+        //
+        // 1. Extract to a tmp dir (above).
+        // 2. Rename tmp → versioned target dir.
+        // 3. Atomically swap `current` → new versioned dir.
+        // 4. Clean up older `javalens-*` dirs (single-cached-runtime
+        //    invariant preserved from pre-bug-#8 behaviour).
+        // 5. Write runtime.json with the stable `current/...` jar path.
 
         fs::rename(&extract_root, &target_dir).map_err(|error| {
             format!(
@@ -418,10 +417,46 @@ impl ReleaseManager {
         })?;
         let _ = fs::remove_dir_all(&tmp_dir);
 
+        let target_dir_name = target_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or("invalid target directory name")?
+            .to_string();
+
+        // Atomic commit point — on POSIX this is a rename-into-place of a
+        // tmp symlink. On unsupported platforms the install still succeeds
+        // but the recorded jar_path falls back to the versioned form (so
+        // the install is operational; only the bug-#8 mitigation degrades).
+        let stable_jar_path = match update_current_symlink(&tools_dir, &target_dir_name) {
+            Ok(()) => tools_dir.join("current").join(&jar_relative_path),
+            Err(error) => {
+                eprintln!(
+                    "javalens-manager: falling back to versioned jar path ({}). \
+                     Bug #8 mitigation degraded on this platform.",
+                    error
+                );
+                target_dir.join(&jar_relative_path)
+            }
+        };
+
+        // Clean up older javalens-* dirs (NOT the current one).
+        if let Ok(entries) = fs::read_dir(&tools_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                        if name.starts_with("javalens-") && name != target_dir_name {
+                            let _ = fs::remove_dir_all(&path);
+                        }
+                    }
+                }
+            }
+        }
+
         let runtime = ManagedRuntimeRecord {
             version: release.version.clone(),
             install_dir: display_path(&target_dir),
-            jar_path: display_path(&target_dir.join(&jar_relative_path)),
+            jar_path: display_path(&stable_jar_path),
             asset_name: release.asset_name.clone(),
             installed_at: release
                 .published_at
@@ -598,6 +633,57 @@ pub fn compare_version_strings(left: &str, right: &str) -> std::cmp::Ordering {
     }
 }
 
+/// Atomically updates the `current` symlink in `tools_dir` to point at
+/// `target_dir_name` (a sibling directory name like `javalens-1.8.5`).
+///
+/// On POSIX: creates a relative symlink at `tools_dir/.current.tmp-<ts>`
+/// then `rename(2)`s it over the existing `tools_dir/current` — atomic
+/// per POSIX semantics, so any concurrent reader sees either the old
+/// target or the new one, never a half-state.
+///
+/// On non-POSIX (Windows): returns Err. The caller (`install_release`)
+/// catches this and falls back to recording the versioned jar path in
+/// `runtime.json`, so the install still succeeds but bug #8's
+/// auto-download-doesn't-break-deployed-configs mitigation degrades. Full
+/// Windows support lands with the Sprint 16 Windows installer track.
+fn update_current_symlink(tools_dir: &Path, target_dir_name: &str) -> Result<(), String> {
+    let current = tools_dir.join("current");
+    let tmp = tools_dir.join(format!(".current.tmp-{}", current_timestamp_string()));
+
+    // Defensive: a previous interrupted run could have left a tmp file.
+    let _ = fs::remove_file(&tmp);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        // Relative target so the symlink keeps resolving if the parent dir
+        // ever moves (e.g. user changes data_root and copies the tree).
+        symlink(target_dir_name, &tmp).map_err(|error| {
+            format!(
+                "failed to create current symlink at {}: {error}",
+                tmp.display()
+            )
+        })?;
+        fs::rename(&tmp, &current).map_err(|error| {
+            let _ = fs::remove_file(&tmp);
+            format!(
+                "failed to swap current symlink at {}: {error}",
+                current.display()
+            )
+        })?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = target_dir_name;
+        let _ = current;
+        Err(format!(
+            "current symlink not yet supported on this platform \
+             (Sprint 16 Windows installer follow-up)"
+        ))
+    }
+}
+
 fn find_relative_jar_path(root: &Path) -> Result<PathBuf, String> {
     for entry in WalkDir::new(root) {
         let entry =
@@ -663,6 +749,110 @@ mod tests {
         assert!(matches!(status.kind, ReleaseStatusKind::UpdateAvailable));
         assert!(status.update_available);
         assert_eq!(status.latest_version.as_deref(), Some("1.2.0"));
+    }
+
+    // ===== Sprint 15 Stage 8 (bug #8) =====
+
+    #[cfg(unix)]
+    fn unique_test_dir(label: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "javalens-stage8-{}-{}-{}",
+            label,
+            nanos,
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("create test tools dir");
+        dir
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn current_symlink_points_at_target() {
+        let tools_dir = unique_test_dir("symlink-points");
+        let target = "javalens-1.8.0";
+        let target_dir = tools_dir.join(target);
+        fs::create_dir_all(target_dir.join("inner"))
+            .expect("create target dir");
+        fs::write(target_dir.join("inner/javalens.jar"), b"fake-jar")
+            .expect("write jar fixture");
+
+        update_current_symlink(&tools_dir, target).expect("symlink");
+
+        let current = tools_dir.join("current");
+        assert!(current.exists(), "current symlink must exist");
+        // Reading through the symlink should hit the jar contents.
+        let bytes = fs::read(current.join("inner/javalens.jar"))
+            .expect("read jar through current symlink");
+        assert_eq!(&bytes[..], b"fake-jar");
+
+        fs::remove_dir_all(&tools_dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn current_symlink_points_at_latest_extracted() {
+        // Two-version sequence: install v1, then v2 — `current` must end
+        // up resolving to v2. This mirrors the real upgrade flow.
+        let tools_dir = unique_test_dir("symlink-latest");
+
+        let v1_name = "javalens-1.8.0";
+        let v1_dir = tools_dir.join(v1_name);
+        fs::create_dir_all(v1_dir.join("inner")).expect("create v1 dir");
+        fs::write(v1_dir.join("inner/javalens.jar"), b"v1-jar").expect("v1 jar");
+        update_current_symlink(&tools_dir, v1_name).expect("symlink v1");
+
+        let v2_name = "javalens-1.8.5";
+        let v2_dir = tools_dir.join(v2_name);
+        fs::create_dir_all(v2_dir.join("inner")).expect("create v2 dir");
+        fs::write(v2_dir.join("inner/javalens.jar"), b"v2-jar").expect("v2 jar");
+        update_current_symlink(&tools_dir, v2_name).expect("symlink v2 (re-point)");
+
+        let bytes = fs::read(tools_dir.join("current/inner/javalens.jar"))
+            .expect("read jar through current after re-point");
+        assert_eq!(&bytes[..], b"v2-jar",
+            "current must resolve to v2 jar after re-point");
+        // v1 dir still present at this layer; real install_release would
+        // delete it after the symlink swap.
+        assert!(v1_dir.exists(),
+            "stage helper does not delete old versioned dirs — install_release does");
+
+        fs::remove_dir_all(&tools_dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn current_symlink_overwrites_existing_symlink_atomically() {
+        let tools_dir = unique_test_dir("symlink-swap");
+        fs::create_dir_all(tools_dir.join("javalens-a")).unwrap();
+        fs::create_dir_all(tools_dir.join("javalens-b")).unwrap();
+
+        update_current_symlink(&tools_dir, "javalens-a").expect("first symlink");
+        // Re-point: the swap must succeed even though `current` already
+        // exists (POSIX rename overwrites).
+        update_current_symlink(&tools_dir, "javalens-b").expect("re-point");
+
+        let resolved = fs::read_link(tools_dir.join("current"))
+            .expect("read symlink target");
+        assert_eq!(resolved, std::path::Path::new("javalens-b"));
+
+        // No leftover .current.tmp-* litter.
+        let leftovers: Vec<_> = fs::read_dir(&tools_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with(".current.tmp-")
+            })
+            .collect();
+        assert!(leftovers.is_empty(),
+            "no tmp-symlink leftovers after successful swap");
+
+        fs::remove_dir_all(&tools_dir).ok();
     }
 
     #[test]
