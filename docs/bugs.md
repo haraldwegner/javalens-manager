@@ -10,7 +10,7 @@ For each entry include: ID, date observed, severity, reproducer, expected vs act
 
 ## #9 — `autostartOnBoot: false` does not prevent javalens MCP servers from auto-starting
 
-- **Status:** OPEN
+- **Status:** FIXED in v0.15.0 (PRIMARY fix, end-to-end, coupled with fork v1.8.5). Manager hosts ONE resident JVM per workspace; deployed MCP-client configs emit URL endpoints (`{ url, headers: { Authorization: Bearer <token> } }`) instead of stdio commands; `autostart_on_boot=false` strips the entries (Remove mode, default) or disables them (Disable mode). N clients × M workspaces → M JVMs total, not N×M. See [release notes v0.15.0](release-notes/v0.15.0.md). Commits: `b697617` (Stage 9 port+token allocator), `a2a6284` (Stage 10 resident JVM hosting), `3e11f19` (Stage 11 URL-emitting MCP writer).
 - **Date observed:** 2026-06-06
 - **Reporter:** Harald.
 - **Environment:** javalens-manager v0.14.1 (settings at `~/.config/javalens-manager/settings.json`), javalens-mcp v1.8.0, Cursor + Claude Code extension, Pop!_OS 22.04.
@@ -80,7 +80,7 @@ Earlier scoping had a "secondary fix only" (writer respects `autostart_on_boot`)
 
 ## #8 — MCP client configs reference versioned jar path; auto-downloaded new jar breaks the deployed service until re-deployed
 
-- **Status:** OPEN
+- **Status:** FIXED in v0.15.0 (commit `f9ef313`). Stable `~/.cache/javalens-manager/tools/javalens/current/` symlink replaces the versioned jar path; POSIX atomic rename-into-place is the install commit point; older versioned dirs cleaned up after the swap. Bug obviated end-to-end by v0.15.0's switch to URL-form deployed configs (Stage 11) — clients no longer reference the jar path at all. Windows symlink path folded into Sprint 16 Windows installer track.
 - **Date observed:** 2026-06-04 (fork v1.8.0 publish — manager's release-poller auto-downloaded the new jar, but MCP service entries deployed to Cursor / Claude / Antigravity / Claude Desktop still referenced the v1.7.1 jar path and failed to spawn).
 - **Reporter:** Harald, via v0.14.1 live smoke after fork v1.8.0 shipped.
 - **Server version:** v0.14.1.

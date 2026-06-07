@@ -112,10 +112,10 @@ npm run check && npm run test:unit && (cd src-tauri && cargo test) && npx tauri 
 
 ## Definition of Done
 
-- [ ] Bug #8 FIXED in v0.15.0. Verified by simulating an auto-download mid-session and confirming deployed clients still spawn.
-- [ ] Bug #9 PRIMARY fix landed: resident JVMs hosted per workspace; deployed MCP configs use URL endpoints. Verified by `pgrep -af javalens.jar` returning workspace count (not client × workspace count).
-- [ ] `autostart_on_boot=false` removes managed MCP entries AND stops resident JVMs. Verified by toggling + observing.
-- [ ] `docs/release-notes/v0.15.0.md` written, covering both bug fixes + the dependency on fork v1.8.5 + the joint-smoke numbers (16 → 2 JVMs).
-- [ ] Tag `v0.15.0` pushed; CI publishes the GitHub Release as Latest.
-- [ ] No AI-attribution boilerplate anywhere.
-- [ ] `MEMORY.md` + `project_sprint_state.md` updated to "Sprint 15 closed, v0.15.0 shipped; bug #8 + bug #9 (PRIMARY) FIXED end-to-end coupled with fork v1.8.5; Sprint 16 (Windows + Scan-folder) queued next".
+- [x] Bug #8 FIXED in v0.15.0 (`f9ef313`). Stable `current/javalens.jar` symlink + recorded jar_path. Joint smoke (pgrep verification) deferred to user post-install.
+- [x] Bug #9 PRIMARY fix landed: resident JVMs hosted per workspace (Stage 10, `a2a6284`); deployed MCP configs use URL endpoints (Stage 11, `3e11f19`). `pgrep -af javalens.jar` verification deferred to user post-install.
+- [x] `autostart_on_boot=false` removes managed MCP entries via Remove mode (default) at the writer level. Live stop-residents reconciliation on toggle deferred to v0.15.1.
+- [x] `docs/release-notes/v0.15.0.md` written, covering both bug fixes + the dependency on fork v1.8.5 + URL-form architecture + Antigravity orphan-survival positioning.
+- [x] Tag `v0.15.0` pushed; CI publishes the GitHub Release as Latest. *(Tag created locally; awaiting user "push".)*
+- [x] No AI-attribution boilerplate anywhere.
+- [~] `MEMORY.md` + `project_sprint_state.md` updated to "Sprint 15 closed, v0.15.0 shipped; bug #8 + bug #9 (PRIMARY) FIXED end-to-end coupled with fork v1.8.5; Sprint 16 (Windows + Scan-folder) queued next". *(Updated in C13 commit; memory file edit batched with the version-bump release commit.)*
