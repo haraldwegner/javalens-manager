@@ -206,20 +206,32 @@ pub fn default_mcp_disabled_writer_mode() -> WriterMode {
 }
 
 /// Default GitHub repo for the managed JavaLens runtime release stream.
-/// hw1964/javalens-mcp is the fork that ships the source-resolution fixes
-/// (pom.xml <sourceDirectory> and Eclipse .classpath). The legacy upstream
-/// (pzalutski-pixel/javalens-mcp) is preserved in OLD_DEFAULT_RELEASE_REPO
-/// only for the one-shot migration in read_settings.
-/// Override per-user by editing settings.json or via the JAVALENS_RELEASE_REPO
-/// env var. Format: "<owner>/<repo>".
+///
+/// Sprint 15 Stage 12: GitHub username rename hw1964 → haraldwegner
+/// (2026-06-07). The redirect doesn't reliably follow at the
+/// `releases/latest` API endpoint for anonymous polls, so an explicit
+/// migration is necessary — see `OLD_DEFAULT_RELEASE_REPO` below.
+///
+/// Earlier history: hw1964/javalens-mcp was the fork that shipped the
+/// source-resolution fixes (pom.xml <sourceDirectory>, Eclipse .classpath)
+/// vs the original upstream `pzalutski-pixel/javalens-mcp`.
+///
+/// Override per-user by editing settings.json or via the
+/// `JAVALENS_RELEASE_REPO` env var. Format: "<owner>/<repo>".
 pub fn default_release_repo() -> String {
-    "hw1964/javalens-mcp".to_string()
+    "haraldwegner/javalens-mcp".to_string()
 }
 
-/// The pre-v0.10.0 default. Used only by read_settings to migrate existing
-/// settings.json files that still hold the legacy upstream value to the new
-/// fork-based default. Once migrated, this constant is unused.
-const OLD_DEFAULT_RELEASE_REPO: &str = "pzalutski-pixel/javalens-mcp";
+/// Legacy values rewritten to the current default on read.
+/// - `pzalutski-pixel/javalens-mcp` — the pre-v0.10.0 upstream default.
+/// - `hw1964/javalens-mcp` — the pre-v0.15.0 fork default (before the
+///   2026-06-07 GitHub username rename to haraldwegner). The GitHub
+///   redirect on `releases/latest` is unreliable for anonymous polls, so
+///   the manager rewrites stale config to the new URL on startup.
+const LEGACY_DEFAULT_RELEASE_REPOS: &[&str] = &[
+    "pzalutski-pixel/javalens-mcp",
+    "hw1964/javalens-mcp",
+];
 
 impl ManagerSettings {
     pub(crate) fn default_for_paths(paths: &AppPaths) -> Self {
@@ -917,7 +929,10 @@ fn read_settings(path: &Path, paths: &AppPaths) -> Result<ManagerSettings, Strin
     // default so users get our source-resolution fixes without needing to
     // edit settings.json by hand. Explicit user choices (anything other
     // than the legacy default) are preserved.
-    if settings.release_repo == OLD_DEFAULT_RELEASE_REPO {
+    if LEGACY_DEFAULT_RELEASE_REPOS
+        .iter()
+        .any(|legacy| settings.release_repo == *legacy)
+    {
         settings.release_repo = default_release_repo();
     }
     settings.mcp_client_paths = merge_detected_mcp_paths(settings.mcp_client_paths);

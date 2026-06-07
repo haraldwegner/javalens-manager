@@ -871,10 +871,10 @@ mod tests {
         // Ensure env var is not influencing this test.
         std::env::remove_var("JAVALENS_RELEASE_REPO");
 
-        // Default: fork with the source-resolution fix.
+        // Default: fork at the post-rename URL (haraldwegner).
         assert_eq!(
             latest_release_url(&settings),
-            "https://api.github.com/repos/hw1964/javalens-mcp/releases/latest"
+            "https://api.github.com/repos/haraldwegner/javalens-mcp/releases/latest"
         );
 
         // Custom override (e.g. legacy upstream or another fork).
