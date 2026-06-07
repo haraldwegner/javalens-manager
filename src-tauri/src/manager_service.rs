@@ -1186,6 +1186,15 @@ impl ManagerService {
         let workspace_dir = crate::config::display_path(
             &settings.workspace_root().join(&project.workspace_name),
         );
+
+        // Sprint 15 Stage 10: each workspace gets a stable (port, token)
+        // pair allocated from ConfigStore. Sprint 11's URL-emitting MCP
+        // writer reads the same state to point client configs at the
+        // resident JVM.
+        let workspace_state = self
+            .config_store
+            .get_or_allocate_workspace_state(&project.workspace_name)?;
+
         match &settings.global_runtime_source {
             RuntimeSource::Managed => {
                 let runtime = installed_runtime
@@ -1197,6 +1206,8 @@ impl ManagerService {
                     workspace_dir,
                     runtime_label: format!("Managed JavaLens {}", runtime.version),
                     resolved_jar_path: runtime.jar_path.clone(),
+                    resident_port: workspace_state.resident_port,
+                    resident_token: workspace_state.resident_token,
                 })
             }
             RuntimeSource::LocalJar { jar_path } => Ok(RuntimeReference {
@@ -1205,6 +1216,8 @@ impl ManagerService {
                 workspace_dir,
                 runtime_label: "Local JavaLens JAR".into(),
                 resolved_jar_path: jar_path.clone(),
+                resident_port: workspace_state.resident_port,
+                resident_token: workspace_state.resident_token,
             }),
         }
     }

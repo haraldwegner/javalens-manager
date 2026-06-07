@@ -3,9 +3,13 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, OpenOptions},
+    io::{BufRead, BufReader, Write},
     path::Path,
     process::{Child, Command, Stdio},
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::{Duration, Instant},
 };
 
@@ -76,7 +80,7 @@ impl RuntimeStatusRecord {
         Self {
             phase: RuntimePhase::Failed,
             workspace_name,
-            transport: "stdio".into(),
+            transport: "http".into(),
             pid: None,
             log_path: String::new(),
             resolved_jar_path: String::new(),
@@ -103,6 +107,15 @@ pub struct RuntimeReference {
     pub workspace_dir: String,
     pub runtime_label: String,
     pub resolved_jar_path: String,
+    /// Sprint 15 Stage 10: bind port for the resident-JVM HTTP transport.
+    /// Allocated once per workspace via
+    /// `ConfigStore::get_or_allocate_workspace_state` and stable across
+    /// manager restarts.
+    pub resident_port: u16,
+    /// Sprint 15 Stage 10: Bearer token the resident JVM accepts and the
+    /// manager-deployed MCP-config writes into client `Authorization`
+    /// headers (Stage 11). Allocated alongside `resident_port`.
+    pub resident_token: String,
 }
 
 /// Launch request for one javalens spawn. Manager_service has already
@@ -136,6 +149,15 @@ struct ManagedRuntime {
     workspace_dir: String,
     runtime_label: String,
     resolved_jar_path: String,
+    /// Sprint 15 Stage 10: per-workspace HTTP port the fork is bound to
+    /// (`-port <N>`). Carried so status records expose the URL the
+    /// manager-deployed MCP clients connect to.
+    resident_port: u16,
+    /// Sprint 15 Stage 10: flipped to true by the stdout-capture thread
+    /// the moment the fork emits its `READY url=... token=...` line.
+    /// Phase transitions consult this to mark Running on a real readiness
+    /// signal rather than the legacy 2s-elapsed heuristic.
+    ready: Arc<AtomicBool>,
 }
 
 pub struct RuntimeManager {
@@ -195,44 +217,81 @@ impl RuntimeManager {
         })?;
 
         let log_path = spec.log_path.clone();
-        let log_file = OpenOptions::new()
+        let stderr_file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&log_path)
             .map_err(|error| format!("failed to open {log_path}: {error}"))?;
-        let stderr_file = log_file
-            .try_clone()
-            .map_err(|error| format!("failed to clone log file handle: {error}"))?;
 
         let mut command = Command::new(&spec.command);
         command.args(&spec.args);
         command.stdin(Stdio::piped());
-        command.stdout(Stdio::from(log_file));
+        // Sprint 15 Stage 10: pipe stdout (was direct-to-file) so the
+        // capture thread can both tee to the log AND watch for the
+        // `READY url=... token=...` line the fork v1.8.5 emits when its
+        // HTTP listener is bound. Stderr stays piped directly to the log.
+        command.stdout(Stdio::piped());
         command.stderr(Stdio::from(stderr_file));
 
         for (key, value) in &spec.env {
             command.env(key, value);
         }
 
-        let child = command.spawn().map_err(|error| {
+        let mut child = command.spawn().map_err(|error| {
             format!(
                 "failed to launch JavaLens. Confirm Java and the resolved runtime path are valid: {error}"
             )
         })?;
 
         let pid = child.id();
+        let ready = Arc::new(AtomicBool::new(false));
+
+        // Sprint 15 Stage 10: stdout-capture thread. Tees each line to the
+        // log file AND watches for the READY contract. The thread exits on
+        // EOF (when the child exits or closes its stdout). Errors writing
+        // to the log are best-effort — they shouldn't tear down the
+        // workspace just because the log file rotated.
+        if let Some(stdout) = child.stdout.take() {
+            let log_path_for_thread = log_path.clone();
+            let ready_flag = Arc::clone(&ready);
+            std::thread::Builder::new()
+                .name(format!("runtime-stdout:{}", reference.workspace_name))
+                .spawn(move || {
+                    let mut log_file = match OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&log_path_for_thread)
+                    {
+                        Ok(f) => f,
+                        Err(_) => return, // log open failed; nothing to tee to
+                    };
+                    let reader = BufReader::new(stdout);
+                    for line in reader.lines().map_while(Result::ok) {
+                        let _ = writeln!(log_file, "{}", line);
+                        // The fork emits exactly one READY line of the form
+                        // `READY url=http://<bind>:<port> token=<token>`
+                        // when its HTTP listener is bound. First occurrence
+                        // wins; subsequent matches are no-ops.
+                        if line.starts_with("READY url=") {
+                            ready_flag.store(true, Ordering::Release);
+                        }
+                    }
+                })
+                .map_err(|error| format!("failed to spawn stdout-capture thread: {error}"))?;
+        }
+
         let status = RuntimeStatusRecord {
             project_id: reference.project_id.clone(),
             phase: RuntimePhase::Starting,
             workspace_name: reference.workspace_name.clone(),
-            transport: "stdio".into(),
+            transport: "http".into(),
             pid: Some(pid),
             workspace_dir: reference.workspace_dir.clone(),
             log_path: log_path.clone(),
             runtime_label: reference.runtime_label.clone(),
             resolved_jar_path: reference.resolved_jar_path.clone(),
             service_mode: "manager-process".into(),
-            detail: "Process launched. workspace.json drives in-process project loading.".into(),
+            detail: "Process launched. Waiting for fork READY line on stdout.".into(),
             exit_code: None,
         };
 
@@ -248,6 +307,8 @@ impl RuntimeManager {
                 workspace_dir: reference.workspace_dir.clone(),
                 runtime_label: reference.runtime_label.clone(),
                 resolved_jar_path: reference.resolved_jar_path.clone(),
+                resident_port: reference.resident_port,
+                ready,
             },
         );
         self.persist_snapshot(status.clone())?;
@@ -310,7 +371,7 @@ impl RuntimeManager {
             project_id: reference.project_id.clone(),
             phase: RuntimePhase::Stopped,
             workspace_name: reference.workspace_name.clone(),
-            transport: "stdio".into(),
+            transport: "http".into(),
             pid: None,
             workspace_dir: reference.workspace_dir.clone(),
             log_path: self.default_log_path(&reference.workspace_name),
@@ -379,7 +440,7 @@ impl RuntimeManager {
                 project_id: reference.project_id.clone(),
                 phase: RuntimePhase::Stopped,
                 workspace_name: reference.workspace_name.clone(),
-                transport: "stdio".into(),
+                transport: "http".into(),
                 pid: None,
                 workspace_dir: reference.workspace_dir.clone(),
                 log_path: self.default_log_path(&reference.workspace_name),
@@ -435,19 +496,26 @@ impl RuntimeManager {
 
     pub fn command_spec_for(&self, launch_request: &RuntimeLaunchRequest) -> CommandSpec {
         let log_path = self.default_log_path(&launch_request.reference.workspace_name);
+        let reference = &launch_request.reference;
 
         // Sprint 10 v0.10.4: javalens reads its project list from
         // <workspace_dir>/workspace.json (written by manager_service).
-        // No JAVA_PROJECT_PATH env var; that legacy single-project flow is
-        // preserved in javalens-mcp v1.4.0 for direct manual launches but
-        // the manager always uses the workspace.json contract.
+        //
+        // Sprint 15 Stage 10: against fork v1.8.5 the default transport is
+        // HTTP, so the manager pins it explicitly (-port + -token). The
+        // resident JVM emits its READY line on stdout which the spawn path
+        // captures to flip the phase to Running.
         CommandSpec {
             command: "java".into(),
             args: vec![
                 "-jar".into(),
-                launch_request.reference.resolved_jar_path.clone(),
+                reference.resolved_jar_path.clone(),
                 "-data".into(),
-                launch_request.reference.workspace_dir.clone(),
+                reference.workspace_dir.clone(),
+                "-port".into(),
+                reference.resident_port.to_string(),
+                "-token".into(),
+                reference.resident_token.clone(),
             ],
             env: vec![],
             log_path,
@@ -499,7 +567,7 @@ impl RuntimeManager {
                 project_id: reference.project_id.clone(),
                 phase: RuntimePhase::Failed,
                 workspace_name: reference.workspace_name.clone(),
-                transport: "stdio".into(),
+                transport: "http".into(),
                 pid: None,
                 workspace_dir: reference.workspace_dir.clone(),
                 log_path: self.default_log_path(&reference.workspace_name),
@@ -514,7 +582,14 @@ impl RuntimeManager {
         }
 
         handle.members.insert(reference.project_id.clone());
-        let phase = if handle.started_at.elapsed() < Duration::from_secs(2) {
+        // Sprint 15 Stage 10: prefer the READY-line signal when present.
+        // The 2s-elapsed fallback remains for back-compat with stub test
+        // commands (`sleep`, etc.) that don't print READY; in production
+        // fork v1.8.5 emits READY within ~5-10s of spawn, so the signal
+        // path is dominant in the real flow.
+        let phase = if handle.ready.load(Ordering::Acquire) {
+            RuntimePhase::Running
+        } else if handle.started_at.elapsed() < Duration::from_secs(2) {
             RuntimePhase::Starting
         } else {
             RuntimePhase::Running
@@ -523,7 +598,7 @@ impl RuntimeManager {
             project_id: reference.project_id.clone(),
             phase,
             workspace_name: reference.workspace_name.clone(),
-            transport: "stdio".into(),
+            transport: "http".into(),
             pid: Some(handle.child.id()),
             workspace_dir: handle.workspace_dir.clone(),
             log_path: handle.log_path.clone(),
@@ -572,7 +647,7 @@ impl RuntimeManager {
                 project_id: reference.project_id.clone(),
                 phase: RuntimePhase::Failed,
                 workspace_name: reference.workspace_name.clone(),
-                transport: "stdio".into(),
+                transport: "http".into(),
                 pid: None,
                 workspace_dir: reference.workspace_dir.clone(),
                 log_path: self.default_log_path(&reference.workspace_name),
@@ -588,7 +663,12 @@ impl RuntimeManager {
             return Ok(None);
         }
 
-        let phase = if handle.started_at.elapsed() < Duration::from_secs(2) {
+        // Sprint 15 Stage 10: same precedence as try_join_running_workspace —
+        // ready-signal first, then the 2s legacy heuristic for stub-command
+        // test paths.
+        let phase = if handle.ready.load(Ordering::Acquire) {
+            RuntimePhase::Running
+        } else if handle.started_at.elapsed() < Duration::from_secs(2) {
             RuntimePhase::Starting
         } else {
             RuntimePhase::Running
@@ -597,7 +677,7 @@ impl RuntimeManager {
             project_id: reference.project_id.clone(),
             phase,
             workspace_name: reference.workspace_name.clone(),
-            transport: "stdio".into(),
+            transport: "http".into(),
             pid: Some(handle.child.id()),
             workspace_dir: handle.workspace_dir.clone(),
             log_path: handle.log_path.clone(),
@@ -683,6 +763,8 @@ mod tests {
                 workspace_dir: "/cache/javalens/test-ws".into(),
                 runtime_label: "Managed JavaLens 1.4.0".into(),
                 resolved_jar_path: "/tools/javalens/javalens.jar".into(),
+                resident_port: 8800,
+                resident_token: "test-token".into(),
             },
         }
     }
@@ -695,13 +777,19 @@ mod tests {
         let spec = manager.command_spec_for(&launch_request);
 
         assert_eq!(spec.command, "java");
+        // Sprint 15 Stage 10: -port + -token added so the fork v1.8.5
+        // HTTP listener binds where the URL-emitting MCP writer expects.
         assert_eq!(
             spec.args,
             vec![
                 "-jar",
                 "/tools/javalens/javalens.jar",
                 "-data",
-                "/cache/javalens/test-ws"
+                "/cache/javalens/test-ws",
+                "-port",
+                "8800",
+                "-token",
+                "test-token"
             ]
         );
         // Sprint 10 v0.10.4: no JAVA_PROJECT_PATH — workspace.json drives
@@ -782,12 +870,17 @@ mod tests {
     }
 
     fn make_reference(project_id: &str, workspace_name: &str, workspace_dir: &str) -> RuntimeReference {
+        // Sprint 15 Stage 10: tests pass dummy (port, token) values; the
+        // real allocator is exercised in src/resident.rs tests and the
+        // config-store integration tests.
         RuntimeReference {
             project_id: project_id.into(),
             workspace_name: workspace_name.into(),
             workspace_dir: workspace_dir.into(),
             runtime_label: "test-runtime".into(),
             resolved_jar_path: "/dev/null".into(),
+            resident_port: 8800,
+            resident_token: "test-token".into(),
         }
     }
 
@@ -1065,5 +1158,178 @@ mod tests {
         assert!(manager.workspace_pid("test").is_none());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ===== Sprint 15 Stage 10: READY-line capture =====
+
+    /// Stub `CommandSpec` that emits a READY line (matching the fork's
+    /// v1.8.5 contract) then sleeps long enough that the test can observe
+    /// the captured signal.
+    #[cfg(unix)]
+    fn ready_emitting_spec(workspace_name: &str, log_path: String) -> CommandSpec {
+        CommandSpec {
+            command: "sh".into(),
+            args: vec![
+                "-c".into(),
+                format!(
+                    "printf 'READY url=http://127.0.0.1:8800 token=stub-token\\n'; sleep 20; echo done {}",
+                    workspace_name
+                ),
+            ],
+            env: vec![],
+            log_path,
+        }
+    }
+
+    /// Stub `CommandSpec` that prints nothing on stdout for ~3 s, then a
+    /// distinct marker. Used to verify the legacy heuristic still flips
+    /// the phase to Running even when READY never arrives (back-compat).
+    #[cfg(unix)]
+    fn silent_then_marker_spec(log_path: String) -> CommandSpec {
+        CommandSpec {
+            command: "sh".into(),
+            args: vec![
+                "-c".into(),
+                "sleep 20; printf 'late marker (not READY)\\n'".into(),
+            ],
+            env: vec![],
+            log_path,
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spawns_and_captures_ready_line_flips_phase_to_running() {
+        // The fork's READY contract — `READY url=... token=...` on the
+        // first line of stdout — must flip the workspace from Starting to
+        // Running well within the legacy 2 s heuristic, so the dashboard
+        // / tray reflect "ready to use" as soon as the JVM is bound.
+        let dir = unique_test_dir("ready-flips-running");
+        let ws_dir = dir.to_string_lossy().to_string();
+        let log = dir.join("ready.log").to_string_lossy().to_string();
+        let manager = RuntimeManager::new(fake_paths_in(&dir));
+        let reference = make_reference("ready-1", "ready-ws", &ws_dir);
+
+        let initial = manager
+            .start_runtime_with_spec(&reference, ready_emitting_spec("ready-ws", log))
+            .unwrap();
+        assert!(
+            matches!(initial.phase, RuntimePhase::Starting),
+            "spawn returns Starting immediately, was {:?}",
+            initial.phase
+        );
+
+        // Give the stdout-capture thread time to read the READY line.
+        // The shell prints it before sleep, so a few hundred ms is ample.
+        std::thread::sleep(Duration::from_millis(500));
+
+        // Re-querying the workspace now returns Running because the ready
+        // flag is set — within the 2 s elapsed window, the ready signal
+        // takes precedence over the legacy heuristic.
+        let again = manager
+            .start_runtime_with_spec(&reference, ready_emitting_spec("ready-ws", String::new()))
+            .unwrap();
+        assert!(
+            matches!(again.phase, RuntimePhase::Running),
+            "after READY, phase must be Running (got {:?})",
+            again.phase
+        );
+
+        let _ = manager.stop_workspace_runtime("ready-ws");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stdout_capture_tees_lines_to_log_file() {
+        // Sanity: the capture thread MUST still tee stdout to the per-
+        // workspace log file (regression guard for the change from
+        // direct-to-file stdout in pre-Stage-10 to piped+capture).
+        let dir = unique_test_dir("ready-tee");
+        let ws_dir = dir.to_string_lossy().to_string();
+        let log = dir.join("tee.log").to_string_lossy().to_string();
+        let manager = RuntimeManager::new(fake_paths_in(&dir));
+        let reference = make_reference("tee-1", "tee-ws", &ws_dir);
+
+        manager
+            .start_runtime_with_spec(&reference, ready_emitting_spec("tee-ws", log.clone()))
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+
+        let contents = std::fs::read_to_string(&log).expect("read log file");
+        assert!(
+            contents.contains("READY url="),
+            "log file must contain the READY line teed from stdout: {:?}",
+            contents
+        );
+
+        let _ = manager.stop_workspace_runtime("tee-ws");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn missing_ready_falls_back_to_heuristic_running() {
+        // Back-compat: stub commands that don't emit READY still flip to
+        // Running once the legacy 2 s window elapses. Without this fallback
+        // the existing sleep-based membership tests would stay Starting
+        // forever.
+        let dir = unique_test_dir("ready-fallback");
+        let ws_dir = dir.to_string_lossy().to_string();
+        let log = dir.join("fb.log").to_string_lossy().to_string();
+        let manager = RuntimeManager::new(fake_paths_in(&dir));
+        let reference = make_reference("fb-1", "fb-ws", &ws_dir);
+
+        manager
+            .start_runtime_with_spec(&reference, silent_then_marker_spec(log))
+            .unwrap();
+
+        // Past the 2 s heuristic window, phase is Running even though
+        // ready never flipped.
+        std::thread::sleep(Duration::from_millis(2_200));
+        let again = manager
+            .start_runtime_with_spec(
+                &reference,
+                silent_then_marker_spec(String::new()),
+            )
+            .unwrap();
+        assert!(
+            matches!(again.phase, RuntimePhase::Running),
+            "post-2s without READY must fall back to Running (got {:?})",
+            again.phase
+        );
+
+        let _ = manager.stop_workspace_runtime("fb-ws");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    fn fake_paths_in(dir: &Path) -> AppPaths {
+        AppPaths {
+            config_dir: dir.to_path_buf(),
+            state_dir: dir.to_path_buf(),
+            cache_dir: dir.to_path_buf(),
+            projects_file: dir.join("projects.json"),
+            settings_file: dir.join("settings.json"),
+            runtime_state_file: dir.join("runtime-state.json"),
+            default_data_root: dir.to_path_buf(),
+            log_dir: dir.to_path_buf(),
+        }
+    }
+
+    #[cfg(unix)]
+    fn unique_test_dir(label: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "javalens-stage10-{}-{}-{}",
+            label,
+            nanos,
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("create test dir");
+        dir
     }
 }
