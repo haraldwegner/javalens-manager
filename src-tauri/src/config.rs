@@ -306,6 +306,12 @@ pub struct UpdateSettingsInput {
 struct ProjectsFile {
     version: u32,
     projects: Vec<ProjectRecord>,
+    /// Sprint 15 Stage 9: per-workspace resident-JVM bookkeeping
+    /// (`(port, token)` pairs persisted across manager restarts).
+    /// `#[serde(default)]` so v0.14.x-format projects.json files load
+    /// without migration noise.
+    #[serde(default)]
+    workspaces: Vec<crate::resident::WorkspaceState>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -413,6 +419,7 @@ impl ConfigStore {
             let default = ProjectsFile {
                 version: 1,
                 projects: Vec::new(),
+                workspaces: Vec::new(),
             };
             write_json(&paths.projects_file, &default)?;
             default
@@ -594,6 +601,93 @@ impl ConfigStore {
         names
     }
 
+    // ===== Sprint 15 Stage 9: per-workspace resident-JVM state =====
+
+    /// Returns the existing `(port, token)` for the workspace if one has
+    /// been allocated, else `None`. Stage 10's `ResidentService::start`
+    /// uses this to look up an already-assigned pair before deciding to
+    /// allocate.
+    pub fn get_workspace_state(
+        &self,
+        workspace_name: &str,
+    ) -> Option<crate::resident::WorkspaceState> {
+        self.projects
+            .lock()
+            .expect("projects mutex poisoned")
+            .workspaces
+            .iter()
+            .find(|w| w.workspace_name == workspace_name)
+            .cloned()
+    }
+
+    /// Returns every persisted workspace `(port, token)` pair. Used by the
+    /// Stage 11 deploy writer to emit URL endpoints for ALL deployed
+    /// workspaces and by the Stage 10 lifecycle to spawn residents on
+    /// manager start.
+    pub fn list_workspace_states(&self) -> Vec<crate::resident::WorkspaceState> {
+        self.projects
+            .lock()
+            .expect("projects mutex poisoned")
+            .workspaces
+            .clone()
+    }
+
+    /// Returns the existing state for `workspace_name`, allocating a
+    /// fresh `(port, token)` and persisting if none exists yet. The
+    /// allocator skips ports already taken by other workspaces AND
+    /// probes that the candidate is currently bindable on `127.0.0.1`.
+    pub fn get_or_allocate_workspace_state(
+        &self,
+        workspace_name: &str,
+    ) -> Result<crate::resident::WorkspaceState, String> {
+        let mut projects = self.projects.lock().expect("projects mutex poisoned");
+
+        if let Some(existing) = projects
+            .workspaces
+            .iter()
+            .find(|w| w.workspace_name == workspace_name)
+        {
+            return Ok(existing.clone());
+        }
+
+        let taken: std::collections::HashSet<u16> = projects
+            .workspaces
+            .iter()
+            .map(|w| w.resident_port)
+            .collect();
+
+        let allocator = crate::resident::PortAllocator::new();
+        let port = allocator.allocate(&taken)?;
+        let token = crate::resident::generate_token();
+        let state =
+            crate::resident::WorkspaceState::new(workspace_name.to_string(), port, token);
+
+        projects.workspaces.push(state.clone());
+        write_json(&self.paths.projects_file, &*projects)?;
+
+        Ok(state)
+    }
+
+    /// Releases the persisted state for a workspace (e.g. after the last
+    /// project in it is removed and the resident JVM is stopped). Frees
+    /// the port for re-allocation. Returns the removed state, if any.
+    pub fn release_workspace_state(
+        &self,
+        workspace_name: &str,
+    ) -> Result<Option<crate::resident::WorkspaceState>, String> {
+        let mut projects = self.projects.lock().expect("projects mutex poisoned");
+        let index = projects
+            .workspaces
+            .iter()
+            .position(|w| w.workspace_name == workspace_name);
+        let Some(index) = index else {
+            return Ok(None);
+        };
+        let removed = projects.workspaces.remove(index);
+        write_json(&self.paths.projects_file, &*projects)?;
+        Ok(Some(removed))
+    }
+
     pub fn get_settings(&self) -> ManagerSettings {
         self.settings
             .lock()
@@ -763,6 +857,9 @@ fn read_projects(path: &Path) -> Result<ProjectsFile, String> {
                 assigned_port: 0,
             })
             .collect(),
+        // Legacy projects.json files predate Stage 9; resident state is
+        // allocated lazily the first time a workspace is started.
+        workspaces: Vec::new(),
     };
     dedupe_projects_by_id(&mut projects.projects);
     let _ = write_json(path, &projects);
@@ -1210,7 +1307,7 @@ mod tests {
         // detect()-based AppPaths the public constructor uses.
         let store = ConfigStore {
             paths: paths.clone(),
-            projects: Mutex::new(ProjectsFile { version: 1, projects: Vec::new() }),
+            projects: Mutex::new(ProjectsFile { version: 1, projects: Vec::new(), workspaces: Vec::new() }),
             settings: Mutex::new(ManagerSettings::default_for_paths(&paths)),
         };
 
@@ -1244,7 +1341,7 @@ mod tests {
         let paths = paths_in(&dir);
         let store = ConfigStore {
             paths: paths.clone(),
-            projects: Mutex::new(ProjectsFile { version: 1, projects: Vec::new() }),
+            projects: Mutex::new(ProjectsFile { version: 1, projects: Vec::new(), workspaces: Vec::new() }),
             settings: Mutex::new(ManagerSettings::default_for_paths(&paths)),
         };
 
@@ -1274,7 +1371,7 @@ mod tests {
         let paths = paths_in(&dir);
         let store = ConfigStore {
             paths: paths.clone(),
-            projects: Mutex::new(ProjectsFile { version: 1, projects: Vec::new() }),
+            projects: Mutex::new(ProjectsFile { version: 1, projects: Vec::new(), workspaces: Vec::new() }),
             settings: Mutex::new(ManagerSettings::default_for_paths(&paths)),
         };
 
@@ -1323,7 +1420,7 @@ mod tests {
         let paths = paths_in(&dir);
         let store = ConfigStore {
             paths: paths.clone(),
-            projects: Mutex::new(ProjectsFile { version: 1, projects: Vec::new() }),
+            projects: Mutex::new(ProjectsFile { version: 1, projects: Vec::new(), workspaces: Vec::new() }),
             settings: Mutex::new(ManagerSettings::default_for_paths(&paths)),
         };
 
@@ -1348,7 +1445,7 @@ mod tests {
         let paths = paths_in(&dir);
         let store = ConfigStore {
             paths: paths.clone(),
-            projects: Mutex::new(ProjectsFile { version: 1, projects: Vec::new() }),
+            projects: Mutex::new(ProjectsFile { version: 1, projects: Vec::new(), workspaces: Vec::new() }),
             settings: Mutex::new(ManagerSettings::default_for_paths(&paths)),
         };
 
@@ -1372,6 +1469,154 @@ mod tests {
         let names = store.workspace_names_in_use();
         assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ===== Sprint 15 Stage 9: workspace state allocation =====
+
+    fn store_with_empty_state(dir: &Path) -> ConfigStore {
+        let paths = paths_in(dir);
+        ConfigStore {
+            paths: paths.clone(),
+            projects: Mutex::new(ProjectsFile {
+                version: 1,
+                projects: Vec::new(),
+                workspaces: Vec::new(),
+            }),
+            settings: Mutex::new(ManagerSettings::default_for_paths(&paths)),
+        }
+    }
+
+    #[test]
+    fn get_or_allocate_assigns_distinct_ports_per_workspace() {
+        let dir = unique_tempdir("alloc-distinct");
+        let store = store_with_empty_state(&dir);
+
+        let a = store
+            .get_or_allocate_workspace_state("alpha")
+            .expect("alpha");
+        let b = store
+            .get_or_allocate_workspace_state("beta")
+            .expect("beta");
+
+        assert_ne!(a.resident_port, b.resident_port, "ports must differ");
+        assert_ne!(a.resident_token, b.resident_token, "tokens must differ");
+        assert_eq!(a.workspace_name, "alpha");
+        assert_eq!(b.workspace_name, "beta");
+        assert!(
+            (crate::resident::DEFAULT_PORT_RANGE_START
+                ..=crate::resident::DEFAULT_PORT_RANGE_END)
+                .contains(&a.resident_port)
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn get_or_allocate_returns_existing_state_on_repeat_call() {
+        let dir = unique_tempdir("alloc-repeat");
+        let store = store_with_empty_state(&dir);
+
+        let first = store
+            .get_or_allocate_workspace_state("alpha")
+            .expect("first");
+        let second = store
+            .get_or_allocate_workspace_state("alpha")
+            .expect("second");
+
+        assert_eq!(first, second, "subsequent call must return the same state");
+        assert_eq!(store.list_workspace_states().len(), 1, "no duplicate");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn workspace_state_persists_across_restart() {
+        // Persistence smoke: allocate via one store, build a fresh store
+        // pointing at the same projects.json, and verify the allocated
+        // (port, token) survives.
+        let dir = unique_tempdir("alloc-persist");
+        let paths = paths_in(&dir);
+        // Seed projects.json so ConfigStore::new succeeds.
+        write_json(
+            &paths.projects_file,
+            &ProjectsFile { version: 1, projects: Vec::new(), workspaces: Vec::new() },
+        )
+        .expect("seed projects.json");
+        write_json(
+            &paths.settings_file,
+            &ManagerSettings::default_for_paths(&paths),
+        )
+        .expect("seed settings.json");
+
+        let allocated = {
+            let store = ConfigStore {
+                paths: paths.clone(),
+                projects: Mutex::new(
+                    read_projects(&paths.projects_file).expect("read"),
+                ),
+                settings: Mutex::new(read_settings(&paths.settings_file, &paths).expect("settings")),
+            };
+            store
+                .get_or_allocate_workspace_state("alpha")
+                .expect("alloc")
+        };
+
+        // Fresh store reading the same files.
+        let restarted = ConfigStore {
+            paths: paths.clone(),
+            projects: Mutex::new(read_projects(&paths.projects_file).expect("re-read")),
+            settings: Mutex::new(
+                read_settings(&paths.settings_file, &paths).expect("settings"),
+            ),
+        };
+        let after_restart = restarted
+            .get_workspace_state("alpha")
+            .expect("state should survive restart");
+        assert_eq!(after_restart, allocated);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn release_frees_port_for_reuse() {
+        let dir = unique_tempdir("alloc-release");
+        let store = store_with_empty_state(&dir);
+
+        // Pre-fill the range with only 3 ports to force collisions.
+        // (We can't easily inject a custom PortAllocator into ConfigStore
+        // without further plumbing, so we just check the release semantic.)
+        let first = store
+            .get_or_allocate_workspace_state("alpha")
+            .expect("alpha");
+        let released = store
+            .release_workspace_state("alpha")
+            .expect("release ok");
+        assert_eq!(released.as_ref(), Some(&first));
+
+        assert!(
+            store.get_workspace_state("alpha").is_none(),
+            "alpha must be gone after release"
+        );
+
+        // Re-allocating alpha must succeed; the port MAY be the same
+        // (lowest-free-port allocator) since the previous one is now free.
+        let realloc = store
+            .get_or_allocate_workspace_state("alpha")
+            .expect("realloc");
+        assert_eq!(realloc.workspace_name, "alpha");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn release_returns_none_for_unknown_workspace() {
+        let dir = unique_tempdir("alloc-release-none");
+        let store = store_with_empty_state(&dir);
+        assert!(store
+            .release_workspace_state("nonexistent")
+            .expect("release ok")
+            .is_none());
         let _ = fs::remove_dir_all(&dir);
     }
 }

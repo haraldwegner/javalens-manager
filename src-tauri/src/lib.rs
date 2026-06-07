@@ -2,6 +2,7 @@ mod commands;
 mod config;
 mod manager_service;
 mod release_manager;
+mod resident;
 mod runtime_manager;
 
 use config::ConfigStore;
