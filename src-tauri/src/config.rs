@@ -174,10 +174,35 @@ pub struct ManagerSettings {
     pub mcp_backup_before_write: bool,
     #[serde(default = "default_deploy_targets")]
     pub deploy_targets: DeployTargetFlags,
+    /// Sprint 15 Stage 11: how the MCP-config writer behaves when
+    /// `autostart_on_boot` is OFF. `Remove` (default) strips the managed
+    /// servers from `~/.cursor/mcp.json` / `~/.claude.json` entirely;
+    /// `Disable` writes them with `disabled: true` for users who want
+    /// visible-but-inert entries they can toggle on with one click.
+    #[serde(default = "default_mcp_disabled_writer_mode")]
+    pub mcp_disabled_writer_mode: WriterMode,
     #[serde(default = "default_release_repo")]
     pub release_repo: String,
     pub last_release_check: Option<String>,
     pub last_seen_latest_version: Option<String>,
+}
+
+/// Sprint 15 Stage 11: governs the MCP-config writer's behaviour when
+/// `autostart_on_boot` is OFF.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WriterMode {
+    /// Strip managed javalens entries from `~/.cursor/mcp.json` etc.
+    /// Clients see no entry at all — autostart=off ↔ no MCP server.
+    Remove,
+    /// Write the entries with `disabled: true`. Cursor + Claude both
+    /// honour this flag; the entry stays visible in the client's MCP
+    /// list but is inert until the user re-enables.
+    Disable,
+}
+
+pub fn default_mcp_disabled_writer_mode() -> WriterMode {
+    WriterMode::Remove
 }
 
 /// Default GitHub repo for the managed JavaLens runtime release stream.
@@ -211,6 +236,7 @@ impl ManagerSettings {
             mcp_merge_mode: default_mcp_merge_mode(),
             mcp_backup_before_write: default_mcp_backup_before_write(),
             deploy_targets: default_deploy_targets(),
+            mcp_disabled_writer_mode: default_mcp_disabled_writer_mode(),
             release_repo: default_release_repo(),
             last_release_check: None,
             last_seen_latest_version: None,

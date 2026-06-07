@@ -198,10 +198,18 @@ struct ProbeRuntime {
     runtime_label: String,
 }
 
-/// One deployed MCP server entry per workspace (Sprint 10 v0.10.4).
-/// Multiple projects sharing a `workspace_name` collapse into one
-/// ManagedDeployServer; the listed `project_paths` are the workspace's
-/// members for display / mcp-rule generation.
+/// One deployed MCP server entry per workspace.
+///
+/// Sprint 10 v0.10.4: multiple projects sharing a `workspace_name` collapse
+/// into one ManagedDeployServer; the listed `project_paths` are the
+/// workspace's members for display / mcp-rule generation.
+///
+/// Sprint 15 Stage 11: URL form replaces the stdio `command`/`args`/`env`
+/// triple. Clients connect to the resident JVM hosted by the manager
+/// (Stage 10) at the workspace's stable port + Bearer token. The deploy
+/// writer (`build_client_mcp_json`) serializes
+/// `{ url, headers: { Authorization: Bearer <token> } }` per the
+/// Cursor + Claude MCP-config schema.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ManagedDeployServer {
@@ -209,9 +217,14 @@ struct ManagedDeployServer {
     workspace_name: String,
     project_names: Vec<String>,
     project_paths: Vec<String>,
-    command: String,
-    args: Vec<String>,
-    env: HashMap<String, String>,
+    /// Resident JVM URL (`http://127.0.0.1:<resident_port>`).
+    url: String,
+    /// Bearer token the client sends in `Authorization` headers.
+    token: String,
+    /// When true, the writer emits `"disabled": true` in the client
+    /// config. Used by the `Disable` writer mode (Sprint 15 Stage 11)
+    /// when `autostart_on_boot` is off — entry stays visible but inert.
+    disabled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1261,15 +1274,40 @@ impl ManagerService {
         )
     }
 
-    /// Sprint 10 v0.10.4: emit one ManagedDeployServer per **workspace**.
+    /// Sprint 10 v0.10.4 (grouping) + Sprint 15 Stage 11 (URL emission):
+    /// emit one ManagedDeployServer per **workspace**.
+    ///
     /// Projects sharing a `workspace_name` collapse into a single MCP
-    /// server entry whose javalens process loads them all from the
-    /// `workspace.json` file in `workspace_dir`.
+    /// server entry whose URL points at the resident JVM the manager
+    /// hosts for that workspace (Stage 10).
+    ///
+    /// Autostart-honoring behaviour (closes manager bug #9):
+    /// - `autostart_on_boot == true` → entries written with `disabled: false`.
+    /// - `autostart_on_boot == false` + `WriterMode::Remove` (default) →
+    ///   entries are EXCLUDED from the deploy set entirely; existing
+    ///   managed entries in `~/.cursor/mcp.json` / `~/.claude.json` get
+    ///   removed by the merge step downstream.
+    /// - `autostart_on_boot == false` + `WriterMode::Disable` → entries
+    ///   written with `disabled: true`, visible but inert.
     fn build_deploy_servers(
         &self,
         settings: &ManagerSettings,
         projects: &[ProjectRecord],
     ) -> Vec<ManagedDeployServer> {
+        // Sprint 15 Stage 11: autostart=off + Remove → no entries at all.
+        // Empty vec causes the merge step to strip any pre-existing managed
+        // entries from the client configs.
+        if !settings.autostart_on_boot
+            && matches!(
+                settings.mcp_disabled_writer_mode,
+                crate::config::WriterMode::Remove
+            )
+        {
+            return Vec::new();
+        }
+
+        let disabled = !settings.autostart_on_boot;
+
         let installed_runtime = self
             .release_manager
             .get_installed_runtime(settings)
@@ -1292,7 +1330,9 @@ impl ManagerService {
         by_workspace
             .into_iter()
             .filter_map(|(workspace_name, members)| {
-                // Pick any member to resolve the runtime (jar path, data dir).
+                // Pick any member to resolve the runtime (also allocates
+                // the workspace's resident_port + resident_token if not
+                // yet present — Stage 9 + 10 contract).
                 let representative = members.first()?;
                 let reference = self
                     .resolve_runtime_reference_with(
@@ -1303,9 +1343,6 @@ impl ManagerService {
                     .ok()?;
                 let server_id = mcp_server_id_for_workspace(&workspace_name);
 
-                let mut env = HashMap::new();
-                env.insert("JAVALENS_WORKSPACE_NAME".into(), workspace_name.clone());
-
                 let project_names: Vec<String> = members
                     .iter()
                     .map(|p| p.name.clone())
@@ -1315,19 +1352,16 @@ impl ManagerService {
                     .map(|p| p.project_path.clone())
                     .collect();
 
+                let url = format!("http://127.0.0.1:{}", reference.resident_port);
+
                 Some(ManagedDeployServer {
                     id: server_id,
                     workspace_name,
                     project_names,
                     project_paths,
-                    command: "java".into(),
-                    args: vec![
-                        "-jar".into(),
-                        reference.resolved_jar_path.clone(),
-                        "-data".into(),
-                        reference.workspace_dir.clone(),
-                    ],
-                    env,
+                    url,
+                    token: reference.resident_token.clone(),
+                    disabled,
                 })
             })
             .collect()
@@ -2539,13 +2573,21 @@ fn write_managed_json_block(
             existing_servers.retain(|key, _| !is_javalens_managed_mcp_key(key));
         }
 
+        // Sprint 15 Stage 11: URL form replaces stdio command/args/env.
         for server in servers {
-            let server_value = serde_json::json!({
-                "command": server.command,
-                "args": server.args,
-                "env": server.env
-            });
-            existing_servers.insert(server.id.clone(), server_value);
+            let mut entry = serde_json::Map::new();
+            entry.insert("url".into(), serde_json::Value::String(server.url.clone()));
+            entry.insert(
+                "headers".into(),
+                serde_json::json!({
+                    "Authorization": format!("Bearer {}", server.token),
+                }),
+            );
+            if server.disabled {
+                entry.insert("disabled".into(), serde_json::Value::Bool(true));
+            }
+            existing_servers
+                .insert(server.id.clone(), serde_json::Value::Object(entry));
         }
 
         if force_rewrite {
@@ -2650,14 +2692,21 @@ fn build_client_mcp_json(client: &str, servers: &[ManagedDeployServer]) -> serde
     let server_map: serde_json::Map<String, serde_json::Value> = servers
         .iter()
         .map(|server| {
-            (
-                server.id.clone(),
+            // Sprint 15 Stage 11: URL endpoint pointing at the resident
+            // JVM the manager hosts (Stage 10). Cursor + Claude both
+            // accept this shape and honour the optional `disabled` flag.
+            let mut entry = serde_json::Map::new();
+            entry.insert("url".into(), serde_json::Value::String(server.url.clone()));
+            entry.insert(
+                "headers".into(),
                 serde_json::json!({
-                    "command": server.command,
-                    "args": server.args,
-                    "env": server.env
+                    "Authorization": format!("Bearer {}", server.token),
                 }),
-            )
+            );
+            if server.disabled {
+                entry.insert("disabled".into(), serde_json::Value::Bool(true));
+            }
+            (server.id.clone(), serde_json::Value::Object(entry))
         })
         .collect();
 
@@ -3115,5 +3164,119 @@ mod tests {
         // free to leave it absent.
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ===== Sprint 15 Stage 11: URL-emitting MCP writer =====
+
+    fn url_server(id: &str, port: u16, token: &str, disabled: bool) -> ManagedDeployServer {
+        ManagedDeployServer {
+            id: id.into(),
+            workspace_name: id.into(),
+            project_names: vec!["P".into()],
+            project_paths: vec!["/p".into()],
+            url: format!("http://127.0.0.1:{port}"),
+            token: token.into(),
+            disabled,
+        }
+    }
+
+    #[test]
+    fn deploy_writer_emits_url_entries() {
+        let servers = vec![url_server("ws-a", 8800, "tok-a", false)];
+        let json = build_client_mcp_json("cursor", &servers);
+        let entry = &json["mcpServers"]["ws-a"];
+
+        assert_eq!(entry["url"], "http://127.0.0.1:8800");
+        // Stage 11 contract: stdio fields must NOT leak into the new shape.
+        assert!(entry.get("command").is_none(), "must not emit `command`");
+        assert!(entry.get("args").is_none(), "must not emit `args`");
+        assert!(entry.get("env").is_none(), "must not emit `env`");
+    }
+
+    #[test]
+    fn deploy_writer_includes_correct_token_per_workspace() {
+        // Two workspaces, distinct ports + tokens — verify each entry
+        // carries its OWN Bearer token (not the other's).
+        let servers = vec![
+            url_server("ws-a", 8800, "alpha-token", false),
+            url_server("ws-b", 8801, "beta-token", false),
+        ];
+        let json = build_client_mcp_json("cursor", &servers);
+
+        assert_eq!(
+            json["mcpServers"]["ws-a"]["headers"]["Authorization"],
+            "Bearer alpha-token"
+        );
+        assert_eq!(
+            json["mcpServers"]["ws-b"]["headers"]["Authorization"],
+            "Bearer beta-token"
+        );
+    }
+
+    #[test]
+    fn deploy_writer_omits_disabled_when_enabled() {
+        let servers = vec![url_server("ws-a", 8800, "tok", false)];
+        let json = build_client_mcp_json("cursor", &servers);
+        let entry = &json["mcpServers"]["ws-a"];
+        assert!(
+            entry.get("disabled").is_none(),
+            "disabled flag must be omitted when false (cleaner client config)"
+        );
+    }
+
+    #[test]
+    fn deploy_writer_emits_disabled_true_when_set() {
+        // WriterMode::Disable + autostart=off produces servers with
+        // disabled=true. Cursor + Claude honour the flag.
+        let servers = vec![url_server("ws-a", 8800, "tok", true)];
+        let json = build_client_mcp_json("cursor", &servers);
+        let entry = &json["mcpServers"]["ws-a"];
+        assert_eq!(entry["disabled"], serde_json::Value::Bool(true));
+        // Url + headers stay populated so a one-click toggle re-enables
+        // without re-deploying.
+        assert_eq!(entry["url"], "http://127.0.0.1:8800");
+        assert_eq!(
+            entry["headers"]["Authorization"],
+            "Bearer tok"
+        );
+    }
+
+    #[test]
+    fn deploy_writer_empty_when_no_servers() {
+        // autostart=off + WriterMode::Remove produces zero servers; the
+        // downstream merge step strips any pre-existing managed entries.
+        let servers: Vec<ManagedDeployServer> = Vec::new();
+        let json = build_client_mcp_json("cursor", &servers);
+        let map = json["mcpServers"]
+            .as_object()
+            .expect("mcpServers must always be an object");
+        assert!(map.is_empty(), "no servers must serialize to an empty map");
+    }
+
+    #[test]
+    fn writer_mode_default_is_remove() {
+        // Sanity: the default for new ManagerSettings must be Remove
+        // (matches the "autostart off should mean off" user intent).
+        assert_eq!(
+            crate::config::default_mcp_disabled_writer_mode(),
+            crate::config::WriterMode::Remove
+        );
+    }
+
+    #[test]
+    fn writer_mode_round_trips_through_json() {
+        // The settings.json contains the mode by string; round-trip via
+        // serde to confirm both variants persist correctly.
+        let remove = serde_json::to_string(&crate::config::WriterMode::Remove).unwrap();
+        let disable = serde_json::to_string(&crate::config::WriterMode::Disable).unwrap();
+        assert_eq!(remove, "\"remove\"");
+        assert_eq!(disable, "\"disable\"");
+
+        let back_remove: crate::config::WriterMode =
+            serde_json::from_str(&remove).unwrap();
+        let back_disable: crate::config::WriterMode =
+            serde_json::from_str(&disable).unwrap();
+        assert_eq!(back_remove, crate::config::WriterMode::Remove);
+        assert_eq!(back_disable, crate::config::WriterMode::Disable);
     }
 }
