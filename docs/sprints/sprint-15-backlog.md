@@ -1,57 +1,48 @@
 # Sprint 15 Backlog
 
-> **Status: drafted 2026-06-04** after Sprint 14 closed end-to-end (manager v0.14.0 + v0.14.1, fork v1.8.0). Targets manager **v0.15.0** — three requirements bundled because each individually is small but together they round out a release: a real bug fix the user is hitting, a platform expansion that opens the manager to Windows users, and a project-onboarding UX gap the user surfaced during Sprint 14 live smoke.
+> **Status: re-scoped 2026-06-07 (second revision).** Originally drafted with three requirements (bug #8 + Windows installer + scan-folder). First re-scope landed bug #9 SECONDARY fix only. **Second re-scope (this version) expands to bug #9 PRIMARY fix end-to-end** alongside fork v1.8.5 HTTP/SSE-default. Sprint 15 now closes the 30 GB JVM leak completely — no "secondary interim". Windows installer + scan-folder remain in [`sprint-16-backlog.md`](sprint-16-backlog.md).
 >
-> Predecessor: [`sprint-14-backlog.md`](sprint-14-backlog.md). Sprint 14 closed 2026-06-04 with manager v0.14.0 + v0.14.1 shipped and fork v1.8.0 shipped (`ffa68c7`, tag `v1.8.0`, published as Latest). The fork remains independent — its release cadence is needs-driven, not stapled to manager sprints. Sprint 15 is **manager-only**.
+> Predecessor: [`sprint-14-backlog.md`](sprint-14-backlog.md). Sprint 14 closed 2026-06-04 with manager v0.14.0 + v0.14.1 shipped and fork v1.8.0 shipped (`ffa68c7`, tag `v1.8.0`, published as Latest).
+>
+> Targets manager **v0.15.0**. **Depends on fork [Sprint 14a → v1.8.5](../../../javalens-mcp/docs/sprints/sprint-14a-http-sse-transport.md)** (HTTP/SSE as default transport). The two releases ship as a coordinated pair: v1.8.5 first (fork foundation), then v0.15.0 (manager hosting + URL-emitting writer).
 
 ## Goal
 
-Ship **manager v0.15.0** as Latest on GitHub. Close [`docs/bugs.md`](../bugs.md) **#8** (auto-downloaded fork jar breaks deployed MCP client configs). Expand the platform matrix to **Windows ARM + Windows x64** alongside the existing Linux amd64 / Linux arm64 / macOS Apple Silicon builds. Add a **"Scan folder for projects"** mode to the Add Project form so the natural mental model ("I keep my Java repos under `~/Projects`, point the manager there") works without first writing a `.code-workspace` file.
+Ship **manager v0.15.0** as Latest on GitHub, closing two bugs end-to-end (no "deferred to Sprint 17+" — there is no Sprint 17):
+
+1. **Bug #8** ([docs/bugs.md #8](../bugs.md)) — auto-downloaded fork jar breaks deployed MCP client configs because the deployed `args` reference a versioned filename that no longer exists on disk after the auto-download.
+
+2. **Bug #9 PRIMARY fix** ([docs/bugs.md #9](../bugs.md)) — 30 GB JVM leak. Today every MCP client process spawns its own pair of stdio JVMs per deployed workspace (~16 JVMs at ~24 GB observed). The PRIMARY fix is the shared-service architecture: manager hosts ONE resident fork JVM per workspace; deployed MCP-client configs emit URL endpoints pointing at the resident services; N clients × M workspaces → **M JVMs total**, not N × M.
+
+**Acceptance signal:** open 3 Claude windows + 1 Cursor window with `autostartOnBoot` ON → `pgrep -af javalens.jar | wc -l` returns **2** (one per workspace), NOT **16**.
 
 ## Requirements
 
-1. **Bug #8 — Auto-downloaded fork jar breaks deployed MCP clients.** When the release-poller auto-downloads a new fork jar (e.g. `javalens-v1.8.0.jar` replaces `javalens-v1.7.1.jar` on disk), deployed MCP service entries in Cursor / Claude / Antigravity / Claude Desktop still reference the prior versioned filename and fail to spawn ("no such file or directory"). Defeats the headline "polls for fork releases and downloads the latest jar automatically" promise.
+1. **Bug #8 fix — stable jar filename via `current` symlink.** The release-poller's jar-placement step writes the auto-downloaded jar so that `~/.cache/tools/javalens/current` is a symlink atomically pointing at the freshly-extracted versioned dir. Versioned dirs stay on disk for diagnostics + rollback. The deploy writer references `current/javalens.jar` (stable path); subsequent auto-downloads stop breaking deployed configs.
 
-   **Decision (deferred to Stage 1 design):** Option A (stable filename — `javalens.jar` plus a versioned symlink for diagnostics) is the smaller, more durable change; Option B (auto-redeploy after every download) layers cleanly on top if needed. Land Option A first; Option B only if the smoke surfaces a case Option A misses.
+2. **Bug #9 PRIMARY fix — resident JVM hosting + URL-emitting MCP writer.** Four coordinated changes:
 
-   GitHub issue: [hw1964/javalens-manager#1](https://github.com/hw1964/javalens-manager/issues/1).
+   - **Per-workspace port + token allocation.** Each workspace gets a stable `(port, token)` pair on first deploy, persisted in `projects.json`. Port allocator probes a range (default 8800-8999) for free ports; token = 32-byte hex via `SecureRandom`. Pair survives manager restarts; user can override via Settings.
 
-2. **Windows installer generation — Windows ARM + Windows x64.** Add `windows-2022` (x64) + `windows-11-arm` (ARM64) to `release.yml`. Tauri's native Windows bundler produces `.msi` (WiX) and/or `.exe` (NSIS) installers; default both so users can pick. Unsigned at first (SmartScreen warning documented in README's Windows install section, same playbook as the macOS Gatekeeper bypass from Sprint 14). Code-signing certificate is a separate later track.
+   - **Resident JVM lifecycle.** New `ResidentService` subsystem spawns one fork JVM per workspace with `java -jar ~/.cache/tools/javalens/current/javalens.jar -port <port> -token <token> -data <workspace_path>` (HTTP/SSE is default in fork v1.8.5; no `-transport http` flag needed). Captures the `READY url=... token=...` line from stdout. Health-monitors via cheap TCP-connect; SIGTERM → ≤5s → SIGKILL on stop. Lifecycle hooked to manager startup/shutdown + workspace add/remove + `autostart_on_boot` observer.
 
-   Two Windows install paths:
-   - **(A)** Direct download — `.msi` / `.exe` from the GitHub Release page, double-click.
-   - **(B)** Optional PowerShell one-liner if the cost is small (`iwr | iex`-style installer that pulls the right per-arch artifact). Lower priority than (A); cut candidate.
+   - **URL-emitting MCP writer.** `build_deploy_servers` in `manager_service.rs` emits `{ url: "http://127.0.0.1:<port>", headers: { Authorization: Bearer <token> } }` instead of `{ command, args }`. Per-workspace token from the allocator. Replaces the stdio-spawn model in deployed configs.
 
-   Platform matrix after Sprint 15:
-   - Linux amd64 ✓ (since v0.13.0)
-   - Linux arm64 ✓ (since v0.13.1)
-   - macOS Apple Silicon ✓ (since v0.14.0, unsigned)
-   - macOS Intel — **explicitly NOT supported.** Apple stopped shipping Intel Macs in 2023; Sprint 14 shipped Apple Silicon only. Intel-Mac users can install Rosetta 2 (`softwareupdate --install-rosetta`) and run the Apple Silicon `.dmg` via translation if needed.
-   - **Windows x64 (NEW)** — unsigned, SmartScreen bypass documented.
-   - **Windows ARM (NEW)** — unsigned, SmartScreen bypass documented.
-
-3. **Add Project UX — single-project OR scan-parent mode.** Today the Browse button on the Register Project form opens a single-folder picker; whatever folder is picked becomes the project root verbatim ([`ProjectForm.svelte:73-84`](../../src/lib/components/ProjectForm.svelte#L73-L84)). Pointing it at `~/Projects` fails because `~/Projects` isn't itself a Java project. The natural mental model — "scan this directory for all the Java projects under it" — has no entry point unless the user first writes a `.code-workspace` file.
-
-   **Sketch:** add a mode toggle (checkbox or radio) above the path input:
-   - **Single project** (default — current behavior). Browse picks one folder, becomes the project root.
-   - **Scan folder for projects.** Browse picks a parent directory. Submit runs the existing `WalkDir(max_depth=6)` + `detect_java_project_kind` logic from [`manager_service.rs:900`](../../src-tauri/src/manager_service.rs#L900) (currently only reachable via the `discover_workspace_projects` Tauri command, which is gated behind a `.code-workspace` seed). Results render in the same checkbox-list candidate UX already present at the bottom of `ProjectForm.svelte` (the VSCode-workspace import flow). User unchecks any over-discovered junk, clicks Import.
-
-   The candidate-list checkbox UX is the de-junking mechanism: too many results → uncheck the noise → import only what's wanted. This is the existing flow for `.code-workspace` import; the new mode just changes what seeds the scan.
-
-   **Backend reuse:** factor `discover_workspace_projects` into a smaller `scan_directory_for_java_projects(root: PathBuf)` helper. The existing command becomes a thin wrapper that calls the helper for each `.code-workspace` root. A new Tauri command `scan_folder_for_projects(folder)` calls the helper directly.
+   - **Autostart-honoring lifecycle.** When `autostart_on_boot=false`: no resident JVMs spawn AND the writer removes managed entries from `~/.cursor/mcp.json` + `~/.claude.json`. Default mode = `Remove`. Optional `mcp_disabled_writer_mode: "remove" | "disable"` setting exposes Cursor/Claude `disabled: true` mode for users who prefer visible-but-inert entries (cut-candidate; ship Remove-mode-only if schemas surprise).
 
 ## Repos touched
 
-- **`javalens-manager` only.** Fork is unchanged.
+- **`javalens-manager`** — this sprint.
+- **`javalens-mcp`** — coupled release in fork Sprint 14a → v1.8.5 (HTTP/SSE default). Manager v0.15.0 depends on v1.8.5 binary being available before Stage 10 spawn-test can run end-to-end.
 
-## Out of scope (settled)
+## Out of scope (settled — pushed to Sprint 16)
 
-- macOS Intel builds — explicitly NOT in scope, same as Sprint 14. Apple Silicon only on the macOS side. Intel-Mac users run via Rosetta 2 if needed.
-- Windows code-signing certificate — separate later track.
-- Fork-side work — the v1.8.x backlog items in [`javalens-mcp/docs/upgrade-checklist.md`](https://github.com/hw1964/javalens-mcp/blob/master/docs/upgrade-checklist.md) (M2E-resolved classpath, `copy_class` / `wrap_class` strangler-fig, HTTP/SSE transport, `pre_edit_impact`, raise `find_references` truncation cap, Buildship target-platform integration, `move_class` javadoc `@link` import filter) ship under whichever future fork release picks them up. **Sprint 15 is manager-only.**
-- Sprint 14a refactor-tools-must-apply policy retrofit (fork v1.9.0) — independent of Sprint 15.
-- The "Strategic discussion — toward Claude as the best Java dev" items in [`future-sprint-enhancements.md`](future-sprint-enhancements.md) (Gradle / Android, target-form catalogs, smell detection, multi-step orchestration) — bigger arc, separate sprint cycle.
-- Bug #4+ post-v0.14.1 smoke findings, if any surface, get filed into [`docs/bugs.md`](../bugs.md) and roll into Sprint 15+0 or 15.1; not pre-scoped here.
+- **Windows installer generation (Windows ARM + x64)** — moved to [`sprint-16-backlog.md`](sprint-16-backlog.md).
+- **Scan-folder mode for Add Project form** — moved to [`sprint-16-backlog.md`](sprint-16-backlog.md).
+- **macOS Intel builds** — explicitly NOT in scope. Apple Silicon only on the macOS side.
+- **Windows code-signing certificate** — separate later track.
+- **TLS / multi-tenant auth / OAuth** — networked service vision (`sprint-future-networked-service.md`). v0.15.0 uses Bearer tokens over localhost HTTP; multi-user / shared-host hardening is a separate sprint.
+- **`disabled: true` writer mode for Disable variant** — cut-candidate; default `Remove` mode is sufficient for the user's stated need ("autostart off should mean off").
 
 ## Authorship / attribution rule
 
@@ -59,48 +50,49 @@ No Claude / AI / "Generated by …" attribution anywhere — commit messages, PR
 
 ## Workflow rule
 
-Per-stage atomic commits. Focused tests during dev (`npm run test:unit -- <pattern>` for the Svelte side, `cargo test --bin javalens-manager <pattern>` for the Rust side); full reactor / lint / typecheck only at sprint-exit gate. Never push without explicit ask.
+Per-stage atomic commits. Focused tests during dev (`npm run test:unit -- <pattern>` for the Svelte side, `cargo test <pattern>` from `src-tauri/` for the Rust side); full sprint-exit verify (`npm run check && npm run test:unit && (cd src-tauri && cargo test) && npx tauri build`) only at sprint-exit gate. Never push without explicit ask.
 
 ## Order of work (suggested)
 
-1. **Stage 0 — Bug #8 fix (Option A: stable filename + symlink).** Smallest change with the highest unblock value: the user is hitting this every fork release. Rework the release-poller's jar-placement step to write `javalens.jar` (or `javalens-mcp.jar` — TBD by `ReleaseManager` naming convention) as the stable target plus `javalens-v<version>.jar` as a symlink for diagnostics. The Deploy-to-agents writer references the stable name. One-shot re-deploy after this fix rolls out updates existing configs; subsequent auto-downloads stop breaking them.
+Lives in detail in [`~/.claude/plans/make-a-plan-happy-fern.md`](file:///home/harald/.claude/plans/make-a-plan-happy-fern.md). High-level: bug #8 → port+token allocator → resident JVM hosting → URL writer → joint smoke → release v0.15.0. Fork v1.8.5 must tag before the resident-JVM spawn smoke can run against the real binary.
 
-2. **Stage 1 — Backend helper extraction + Scan-folder Tauri command.** Factor `discover_workspace_projects` ([`manager_service.rs:900`](../../src-tauri/src/manager_service.rs#L900)) into a reusable `scan_directory_for_java_projects(root)` helper. Add a new `scan_folder_for_projects(folder)` Tauri command that calls the helper directly. Unit-test the helper against fixture directories.
+1. **Stage 8 — Bug #8 stable jar via `current` symlink.** Independent of fork; safe to do first.
+2. **Stage 9 — Per-workspace port + token allocation subsystem.** New `port_allocator` + `token_generator` utilities; persisted in `projects.json`.
+3. **Stage 10 — Resident JVM hosting (largest stage).** New `resident_service.rs`; spawn / READY-capture / health / lifecycle. Manager startup spawns residents per `autostart_on_boot`; tray "Stop and Quit" stops them.
+4. **Stage 11 — URL-emitting writer + autostart-honoring.** `build_deploy_servers` shifts from stdio command to URL endpoint; observer rewires on `javalens://settings-changed`.
+5. **Stage 12 — Joint live smoke.** 3 Claudes + 1 Cursor + autostart on → expect 2 JVMs (one per workspace). Toggle autostart off → expect 0.
+6. **Stage 13 — Release v0.15.0.** Version bumps, release notes, tag, push.
 
-3. **Stage 2 — Frontend mode toggle in ProjectForm.svelte.** Add the Single project / Scan folder checkbox or radio above the path input. Wire the Scan path: Browse picks a parent → `scan_folder_for_projects` → render results in the existing candidate-list checkbox UX → Import.
-
-4. **Stage 3 — Windows release matrix.** Add `windows-2022` (x64) + `windows-11-arm` (ARM64) jobs to `release.yml`. Verify Tauri's native bundler produces `.msi` / `.exe` per arch. Smoke-install on a Windows VM (or runner artifact download). Update README install section + add a Windows-specific SmartScreen-bypass note mirroring the macOS Gatekeeper one.
-
-5. **Stage 4 — (optional) Windows PowerShell one-liner installer.** Cut candidate. Land if the previous stages have time budget.
-
-6. **Stage 5 — Release v0.15.0.** Version bumps in `package.json` / `Cargo.toml` / `tauri.conf.json`, release notes at `docs/release-notes/v0.15.0.md`, README marketing pivot (mention Windows + Scan-folder mode), tag + push.
+(Stage numbers continue from the joint plan; Phase A Stages 0-7 are fork-side; Stages 8-13 are manager-side.)
 
 ## Critical files
 
-- **Bug #8:** `src-tauri/src/release_manager.rs` (jar-placement + symlink), `src-tauri/src/mcp_deploy.rs` or wherever the Deploy-to-agents writer lives — needs a `grep` pass to confirm the exact file (`src-tauri/src/` has ~10 files; the writer that emits MCP client `args` is the target).
-- **Add Project UX backend:** [`src-tauri/src/manager_service.rs:900-940`](../../src-tauri/src/manager_service.rs#L900-L940) (`discover_workspace_projects`), [`src-tauri/src/manager_service.rs:2108-2140`](../../src-tauri/src/manager_service.rs#L2108-L2140) (`detect_java_project_kind`), [`src-tauri/src/commands.rs:126-145`](../../src-tauri/src/commands.rs#L126-L145) (Tauri command wrappers).
-- **Add Project UX frontend:** [`src/lib/components/ProjectForm.svelte`](../../src/lib/components/ProjectForm.svelte) (mode toggle, Scan path), `src/lib/api/tauri.ts` (new `scanFolderForProjects` wrapper).
-- **Windows release:** `.github/workflows/release.yml` (matrix expansion), `src-tauri/tauri.conf.json` (Windows bundle config — `targets`, `wix` / `nsis` sections), `README.md` (install instructions + SmartScreen note).
+- **Bug #8:** [`src-tauri/src/release_manager.rs`](../../src-tauri/src/release_manager.rs) (jar-placement step around line 605).
+- **Port + token allocator (Stage 9):** new utilities in `src-tauri/src/` + per-workspace fields in [`src-tauri/src/config.rs`](../../src-tauri/src/config.rs).
+- **Resident JVM hosting (Stage 10):** new `src-tauri/src/resident_service.rs` (or expand existing [`src-tauri/src/runtime_manager.rs`](../../src-tauri/src/runtime_manager.rs)). Lifecycle hooks in [`src-tauri/src/lib.rs`](../../src-tauri/src/lib.rs).
+- **URL-emitting writer (Stage 11):** [`src-tauri/src/manager_service.rs`](../../src-tauri/src/manager_service.rs) — `deploy_to_agents` (line 521), `build_deploy_servers` (line 1255), `build_client_mcp_json` (line 2635). Observer pattern at [`src-tauri/src/lib.rs`](../../src-tauri/src/lib.rs) line 265 (`javalens://settings-changed`, Sprint 14 v0.14.1).
 
 ## Reusable infrastructure already in place
 
-- **`WalkDir` + `detect_java_project_kind` + `is_ignored_candidate_path`** in `manager_service.rs` — already battle-tested by the `.code-workspace` import flow. The new Scan-folder mode is a thin reuse, not new logic.
-- **Candidate-list checkbox UX** in `ProjectForm.svelte` (lines 267-291) — already handles select / unselect / import. The Scan-folder mode reuses it verbatim.
-- **GitHub Actions release.yml** with the macOS matrix from Sprint 14 — adding Windows is "two more matrix entries + Tauri bundler config" rather than greenfield CI work.
-- **`ReleaseManager`** for the auto-download lifecycle — the stable-filename + symlink change lands inside its existing jar-placement step, not a new subsystem.
+- **`autostartOnBoot` setting + event observer** — Sprint 14 v0.14.1 shipped settings ↔ tray sync via `javalens://settings-changed`. The writer + lifecycle observer plug into the same event.
+- **`ReleaseManager`** — bug #8 fix is a refinement of its existing jar-placement step, not a new subsystem.
+- **Deploy-to-agents writer** — already generates MCP client configs; Stage 11 changes WHAT shape it writes (URL vs stdio command), not the surrounding plumbing.
+- **Workspace runtime supervision** (Sprint 14 v0.14.0 `RuntimePhase` machine) — Stage 10 extends with resident-JVM PID + port tracking.
 
 ## Verification (sprint exit)
 
-- Bug #8: after fix lands, manually trigger a fork release auto-download (or simulate via `release_manager` test), confirm deployed MCP client configs still spawn the server.
-- Windows builds: artifacts produced by CI for both ARM + x64; smoke-install on a real Windows machine (or a runner artifact download) and start a workspace.
-- Add Project UX: select a parent directory in Scan mode; verify the candidate list populates with detected Maven / Gradle / Eclipse projects under it; uncheck noise; import; confirm imports appear in the dashboard.
-- All existing tests stay GREEN — focused per stage during dev, full `npm test` + `cargo test` at exit.
+- **Bug #8 verified:** simulate fork release auto-download via `release_manager` test fixture; confirm deployed MCP client configs still resolve `current/javalens.jar` after jar swap.
+- **Bug #9 PRIMARY verified:** with autostart ON and v0.15.0 + v1.8.5 running, open 3 Claude windows + 1 Cursor window. `pgrep -af javalens.jar | wc -l` → **2** (one per workspace). Toggle autostart OFF + reopen clients → **0**. (Before the fix: 16.)
+- **Resident-JVM lifecycle:** quit manager → resident JVMs gracefully stopped (SIGTERM → SIGKILL fallback) before manager process exits. Re-launch manager with autostart=on → residents spawn for all workspaces.
+- **Release-poller migration:** simulate v1.8.5 → v1.8.6 release; confirm resident JVMs restart on the new jar (or surface "restart available" indicator per Stage 12's design choice).
+- All existing tests stay GREEN — focused per stage during dev, full `npm test` + `cargo test` + `npx tauri build` at exit.
 
 ## Cut lines (if a stage hits unexpected pain)
 
-- **Stage 4 (PowerShell one-liner)** is the first cut — Windows users can download the `.msi` / `.exe` directly. Sprint still ships Windows as a platform without it.
-- **Stage 2 (frontend toggle)** can split into two: ship the backend command first (Stage 1) + the frontend toggle as a v0.15.1 patch if the UX needs more design iteration than the sprint window allows.
-- **Stage 0 (Bug #8)** is the floor — must ship. Without it the v0.15.0 release itself triggers the bug it's trying to fix.
+- **`mcp_disabled_writer_mode: "disable"` opt-in (Stage 11 sub-step).** First cut. Default `remove` mode satisfies the user's stated need; `disable` mode is a convenience.
+- **Stage 8 (Bug #8)** is a floor — must ship. The v0.15.0 release itself triggers bug #8 without it (own-foot-shoot).
+- **Resident JVM health monitoring (Stage 10 sub-step).** Could simplify to "spawn + READY-capture only, no auto-restart-on-death" for v0.15.0. Health monitor adds resilience but isn't strictly necessary for closing the leak. Defer to v0.15.1 if time pressures.
+- **Bug #9 PRIMARY fix overall** is the second floor — without it the 24 GB leak continues. Don't cut.
 
 ## Build / test commands
 
@@ -111,7 +103,7 @@ npm install
 npm run check               # type / svelte-check
 npm run test:unit -- <pattern>   # focused frontend unit tests
 cd src-tauri && cargo test <pattern>   # focused Rust tests
-cd .. && npx tauri dev      # live smoke
+cd .. && npx tauri dev      # live smoke (depends on fork v1.8.5 jar being downloaded)
 npx tauri build             # local build sanity
 
 # Full sprint-exit verify
@@ -121,10 +113,9 @@ npm run check && npm run test:unit && (cd src-tauri && cargo test) && npx tauri 
 ## Definition of Done
 
 - [ ] Bug #8 FIXED in v0.15.0. Verified by simulating an auto-download mid-session and confirming deployed clients still spawn.
-- [ ] `release.yml` Windows matrix ships `.msi` + `.exe` for both ARM + x64. Artifacts attached to the v0.15.0 GitHub Release.
-- [ ] Add Project form has a Scan folder mode. Selecting `~/Projects` (or any parent dir) shows discovered Java projects in the checkbox list; user can prune + import.
-- [ ] `docs/release-notes/v0.15.0.md` written, covering all three areas.
-- [ ] README install section updated: Windows install path + SmartScreen note + Scan-folder UX mention.
+- [ ] Bug #9 PRIMARY fix landed: resident JVMs hosted per workspace; deployed MCP configs use URL endpoints. Verified by `pgrep -af javalens.jar` returning workspace count (not client × workspace count).
+- [ ] `autostart_on_boot=false` removes managed MCP entries AND stops resident JVMs. Verified by toggling + observing.
+- [ ] `docs/release-notes/v0.15.0.md` written, covering both bug fixes + the dependency on fork v1.8.5 + the joint-smoke numbers (16 → 2 JVMs).
 - [ ] Tag `v0.15.0` pushed; CI publishes the GitHub Release as Latest.
 - [ ] No AI-attribution boilerplate anywhere.
-- [ ] `MEMORY.md` + `project_sprint_state.md` flipped to "Sprint 15 closed, v0.15.0 shipped".
+- [ ] `MEMORY.md` + `project_sprint_state.md` updated to "Sprint 15 closed, v0.15.0 shipped; bug #8 + bug #9 (PRIMARY) FIXED end-to-end coupled with fork v1.8.5; Sprint 16 (Windows + Scan-folder) queued next".

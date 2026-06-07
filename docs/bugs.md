@@ -58,20 +58,22 @@ pid=27362   ppid=27119 (claude)   start=Jun 6 17:59:58
 
 **8 distinct parent processes** (6 claude + 2 cursor MCP-client sessions) × 2 deployed workspaces = 16 JVMs. Stdio MCP transport spawns one private server JVM per client process per workspace; deployments **don't share**. All parents alive, no reparenting — not a forking bug, just stdio's "one JVM per client per workspace" model multiplying because the registrations stay active.
 
-### Suggested fix
+### Fix (in flight — lands in v0.15.0 + fork v1.8.5 as a coordinated release pair)
 
-**Primary — shared HTTP/SSE server mode.** Manager runs one javalens JVM per workspace as a resident service; deployed MCP entries connect to it by URL instead of spawning their own private stdio child. N clients × M workspaces → just **M JVMs total**, not N × M. This is the architectural fix that makes the issue *impossible*: stdio's per-client spawn behavior is the proximate cause, the right answer is to stop using stdio for the multi-client scenario this product is built for. A scaffold sprint already exists: [`javalens-mcp/docs/sprints/sprint-future-http-sse-transport.md`](https://github.com/hw1964/javalens-mcp/blob/master/docs/sprints/sprint-future-http-sse-transport.md) — surfaced 2026-05-17 during EXECSIM Session 2 with the **original motivation being sandbox unblock** (Antigravity / Cursor sandboxes can't spawn arbitrary stdio children). This bug adds the **shared-service / leak-prevention angle as a second independent motivation** that bumps priority — the scaffold was sequenced "likely Sprint 16+", but with two motivations now it deserves promotion.
+**PRIMARY fix — shared HTTP/SSE server mode (Sprint 15 + Sprint 14a, 2026-06-07 plan).** Manager runs one javalens JVM per workspace as a resident service; deployed MCP entries connect to it by URL instead of spawning their own private stdio child. N clients × M workspaces → just **M JVMs total**, not N × M. This is the architectural fix that makes the issue *impossible*: stdio's per-client spawn behavior is the proximate cause, the right answer is to stop using stdio for the multi-client scenario this product is built for.
 
-**Secondary (until shared mode lands) — honor `autostartOnBoot` in the MCP-config writer.** When the setting is off:
+Coupled release pair:
+- **Fork v1.8.5** (Sprint 14a) — HTTP/SSE as the **default** transport (stdio remains supported via `-transport stdio` opt-in). Embeds Jetty, Bearer-token auth, SSE channel, `READY url=... token=...` line on stdout for the manager to capture. See [`javalens-mcp/docs/sprints/sprint-14a-http-sse-transport.md`](https://github.com/haraldwegner/javalens-mcp/blob/master/docs/sprints/sprint-14a-http-sse-transport.md).
+- **Manager v0.15.0** (Sprint 15) — per-workspace `(port, token)` allocator persisted in `projects.json`; new `ResidentService` subsystem spawns + monitors one JVM per workspace; `build_deploy_servers` writes `{ url, headers: { Authorization: Bearer <token> } }` entries instead of stdio commands; `autostart_on_boot=false` removes entries AND stops residents (default `Remove` mode; opt-in `Disable` mode via `mcp_disabled_writer_mode` setting). See [`docs/sprints/sprint-15-backlog.md`](docs/sprints/sprint-15-backlog.md).
 
-- **(a)** Don't write the entries at all (remove them on toggle-off, add them on toggle-on), OR
-- **(b)** Write them with `disabled: true` / `enabled: false` per the client's MCP-config schema (Cursor and Claude both honor a disabled flag).
+Acceptance: 3 Claudes + 1 Cursor with autostart on → `pgrep -af javalens.jar | wc -l` returns **2** (one per workspace), NOT **16**.
 
-(a) is cleaner UX (entries disappear from the client's MCP list — explicit). (b) is less disruptive (the entry stays visible but inert, easy for the user to toggle without re-deploying). Either way, the autostart toggle should mean what it says.
+Earlier scoping had a "secondary fix only" (writer respects `autostart_on_boot`) parked in Sprint 15 + the primary fix deferred to "Sprint 17+". 2026-06-07 plan re-scope absorbed the primary fix into Sprint 15 directly (Manager roadmap stops at Sprint 16; no Sprint 17 exists). The "secondary fix" framing is obsolete — full primary fix lands end-to-end in v0.15.0.
 
 ### Cross-reference
 
-- Fork sprint scaffold: [`sprint-future-http-sse-transport.md`](https://github.com/hw1964/javalens-mcp/blob/master/docs/sprints/sprint-future-http-sse-transport.md) — originally surfaced 2026-05-17 for the sandbox-unblock motivation; this bug adds the shared-service / leak-prevention angle and bumps priority. Also mentioned in [`javalens-mcp/docs/upgrade-checklist.md`](https://github.com/hw1964/javalens-mcp/blob/master/docs/upgrade-checklist.md) "Sprint 15+ backlog" as a v1.8.x follow-up.
+- Fork sprint: [`sprint-14a-http-sse-transport.md`](https://github.com/haraldwegner/javalens-mcp/blob/master/docs/sprints/sprint-14a-http-sse-transport.md) — original motivation was 2026-05-17 EXECSIM sandbox unblock; this bug added the shared-service / leak-prevention angle as the dominant motivation that promoted the sprint from "future" scaffold to "Sprint 14a" immediate next.
+- Executable plan: `~/.claude/plans/make-a-plan-happy-fern.md` — 14 stages C0-C13, fork-first, joint smoke acceptance.
 - Manager state at observation: process not running, no tray icon, `autostartOnBoot: false` in settings. The leak accumulated entirely because the deployed MCP entries continued to dispatch on client startup.
 
 ---
