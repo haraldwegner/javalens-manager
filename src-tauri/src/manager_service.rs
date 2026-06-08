@@ -1692,10 +1692,24 @@ impl ManagerService {
         probe_workspace: &Path,
         started_at: Instant,
     ) -> ServiceProbeResult {
+        // Sprint 15 v0.15.0 hotfix: against fork v1.8.5 the default
+        // transport is HTTP, so without `-transport stdio` the probe child
+        // binds an ephemeral HTTP port and prints `READY url=... token=...`
+        // on its first stdout line. The probe's wire is unambiguously
+        // stdio JSON-RPC (it owns the child's stdin/stdout pipes), so the
+        // fork must stay on the stdio code path here. The resident JVMs
+        // that actually serve clients still launch in HTTP mode via
+        // runtime_manager.rs::command_spec_for, which passes -port + -token.
+        //
+        // Audit 2026-06-08: verified no other Command::new("java") sites
+        // exist in the manager crate (grep -rE 'Command::new\("java"\)' →
+        // exactly two matches: this one + the resident JVM spawn).
         let mut command = Command::new("java");
         command
             .arg("-jar")
             .arg(&runtime.jar_path)
+            .arg("-transport")
+            .arg("stdio")
             .arg("-data")
             .arg(display_path(probe_workspace))
             .stdin(Stdio::piped())
