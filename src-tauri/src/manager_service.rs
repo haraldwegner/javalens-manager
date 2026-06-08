@@ -1281,32 +1281,33 @@ impl ManagerService {
     /// server entry whose URL points at the resident JVM the manager
     /// hosts for that workspace (Stage 10).
     ///
-    /// Autostart-honoring behaviour (closes manager bug #9):
-    /// - `autostart_on_boot == true` → entries written with `disabled: false`.
-    /// - `autostart_on_boot == false` + `WriterMode::Remove` (default) →
-    ///   entries are EXCLUDED from the deploy set entirely; existing
-    ///   managed entries in `~/.cursor/mcp.json` / `~/.claude.json` get
-    ///   removed by the merge step downstream.
-    /// - `autostart_on_boot == false` + `WriterMode::Disable` → entries
-    ///   written with `disabled: true`, visible but inert.
+    /// Sprint 15 v0.15.0 hotfix: deploy is now DECOUPLED from
+    /// `autostart_on_boot`. The Stage 11 original "autostart=off → strip
+    /// entries" logic was misdirected: with v0.15.0's URL semantics the
+    /// deploy entry just points at `http://127.0.0.1:<port>`; whether a
+    /// resident JVM is currently listening there is the resident-service
+    /// lifecycle's concern, not the MCP-config writer's. The old
+    /// "stdio-args auto-spawn on client connect" hazard (the original
+    /// bug #9 framing) is gone — URL clients get connection-refused if
+    /// the resident isn't up; they don't spawn anything themselves.
+    ///
+    /// `WriterMode::Disable` still has a use: writing `disabled: true`
+    /// gives the user a visible-but-inert entry they can re-enable from
+    /// the client side. Triggered when both `autostart_on_boot=false`
+    /// AND the mode is `Disable`. `WriterMode::Remove` no longer strips
+    /// on user-initiated deploy (the user explicitly clicked Deploy —
+    /// honour that). To remove managed entries from clients, the user
+    /// uses the explicit "Delete" deploy mode in the dashboard.
     fn build_deploy_servers(
         &self,
         settings: &ManagerSettings,
         projects: &[ProjectRecord],
     ) -> Vec<ManagedDeployServer> {
-        // Sprint 15 Stage 11: autostart=off + Remove → no entries at all.
-        // Empty vec causes the merge step to strip any pre-existing managed
-        // entries from the client configs.
-        if !settings.autostart_on_boot
+        let disabled = !settings.autostart_on_boot
             && matches!(
                 settings.mcp_disabled_writer_mode,
-                crate::config::WriterMode::Remove
-            )
-        {
-            return Vec::new();
-        }
-
-        let disabled = !settings.autostart_on_boot;
+                crate::config::WriterMode::Disable
+            );
 
         let installed_runtime = self
             .release_manager
@@ -1352,7 +1353,7 @@ impl ManagerService {
                     .map(|p| p.project_path.clone())
                     .collect();
 
-                let url = format!("http://127.0.0.1:{}", reference.resident_port);
+                let url = format!("http://127.0.0.1:{}/mcp", reference.resident_port);
 
                 Some(ManagedDeployServer {
                     id: server_id,
@@ -2392,45 +2393,36 @@ fn validate_client_config_shape(
             )
         })?;
 
-        let command_valid = server_obj
-            .get("command")
+        // Sprint 15 v0.15.0 hotfix: post-write validator was written
+        // when entries had stdio `command` + `args`. URL entries don't
+        // carry those — they have `url` + `headers.Authorization`. The
+        // shape check now matches whichever form the writer emitted.
+        let url_valid = server_obj
+            .get("url")
             .and_then(|value| value.as_str())
             .map(|value| !value.trim().is_empty())
             .unwrap_or(false);
-        if !command_valid {
+
+        if !url_valid {
             return Err(format!(
-                "{client}: server '{}' missing non-empty command",
+                "{client}: server '{}' missing non-empty url",
                 server.id
             ));
         }
 
-        let args = server_obj
-            .get("args")
-            .and_then(|value| value.as_array())
-            .ok_or_else(|| format!("{client}: server '{}' missing args array", server.id))?;
-        if args.is_empty() {
-            return Err(format!(
-                "{client}: server '{}' has empty args array",
-                server.id
-            ));
-        }
-        let args_all_strings = args
-            .iter()
-            .all(|arg| arg.as_str().map(|s| !s.trim().is_empty()).unwrap_or(false));
-        if !args_all_strings {
-            return Err(format!(
-                "{client}: server '{}' has non-string or empty args entries",
-                server.id
-            ));
-        }
+        let auth_valid = server_obj
+            .get("headers")
+            .and_then(|value| value.as_object())
+            .and_then(|headers| headers.get("Authorization"))
+            .and_then(|value| value.as_str())
+            .map(|value| value.starts_with("Bearer ") && value.len() > "Bearer ".len())
+            .unwrap_or(false);
 
-        if let Some(env) = server_obj.get("env") {
-            if !env.is_object() {
-                return Err(format!(
-                    "{client}: server '{}' env must be an object",
-                    server.id
-                ));
-            }
+        if !auth_valid {
+            return Err(format!(
+                "{client}: server '{}' missing valid Authorization Bearer header",
+                server.id
+            ));
         }
     }
 
@@ -2588,8 +2580,13 @@ fn write_managed_json_block(
         }
 
         // Sprint 15 Stage 11: URL form replaces stdio command/args/env.
+        // v0.15.0 hotfix: `type: "http"` is mandatory for Claude Code,
+        // which otherwise falls through to its stdio parser and complains
+        // about missing `command`. Per the Claude Code MCP docs the spec
+        // form is `{ "type": "http", "url": "...", "headers": {...} }`.
         for server in servers {
             let mut entry = serde_json::Map::new();
+            entry.insert("type".into(), serde_json::Value::String("http".into()));
             entry.insert("url".into(), serde_json::Value::String(server.url.clone()));
             entry.insert(
                 "headers".into(),
@@ -2706,10 +2703,13 @@ fn build_client_mcp_json(client: &str, servers: &[ManagedDeployServer]) -> serde
     let server_map: serde_json::Map<String, serde_json::Value> = servers
         .iter()
         .map(|server| {
-            // Sprint 15 Stage 11: URL endpoint pointing at the resident
-            // JVM the manager hosts (Stage 10). Cursor + Claude both
-            // accept this shape and honour the optional `disabled` flag.
+            // Sprint 15 Stage 11 + v0.15.0 hotfix: URL endpoint pointing
+            // at the resident JVM the manager hosts (Stage 10). Includes
+            // `type: "http"` because Claude Code's MCP-config parser
+            // requires it — without `type`, Claude Code falls through to
+            // its stdio schema and rejects the entry as "missing command".
             let mut entry = serde_json::Map::new();
+            entry.insert("type".into(), serde_json::Value::String("http".into()));
             entry.insert("url".into(), serde_json::Value::String(server.url.clone()));
             entry.insert(
                 "headers".into(),
@@ -3188,7 +3188,7 @@ mod tests {
             workspace_name: id.into(),
             project_names: vec!["P".into()],
             project_paths: vec!["/p".into()],
-            url: format!("http://127.0.0.1:{port}"),
+            url: format!("http://127.0.0.1:{port}/mcp"),
             token: token.into(),
             disabled,
         }
@@ -3200,7 +3200,7 @@ mod tests {
         let json = build_client_mcp_json("cursor", &servers);
         let entry = &json["mcpServers"]["ws-a"];
 
-        assert_eq!(entry["url"], "http://127.0.0.1:8800");
+        assert_eq!(entry["url"], "http://127.0.0.1:8800/mcp");
         // Stage 11 contract: stdio fields must NOT leak into the new shape.
         assert!(entry.get("command").is_none(), "must not emit `command`");
         assert!(entry.get("args").is_none(), "must not emit `args`");
@@ -3248,7 +3248,7 @@ mod tests {
         assert_eq!(entry["disabled"], serde_json::Value::Bool(true));
         // Url + headers stay populated so a one-click toggle re-enables
         // without re-deploying.
-        assert_eq!(entry["url"], "http://127.0.0.1:8800");
+        assert_eq!(entry["url"], "http://127.0.0.1:8800/mcp");
         assert_eq!(
             entry["headers"]["Authorization"],
             "Bearer tok"
