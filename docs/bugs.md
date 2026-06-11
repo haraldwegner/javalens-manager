@@ -8,6 +8,37 @@ For each entry include: ID, date observed, severity, reproducer, expected vs act
 
 ---
 
+## #14 — Deployed client configs go stale on workspace add (no auto-redeploy, no drift indicator) + writer silently drops unresolvable workspaces
+
+- **Status:** OPEN (targeted: v0.16.0)
+- **Date observed:** 2026-06-11 (live: added `javalens-mcp` workspace)
+- **Reporter:** Harald.
+- **Environment:** javalens-manager v0.15.1, fork v1.8.6, Pop!_OS 22.04.
+- **Severity:** MEDIUM-HIGH — a freshly added workspace is invisible to every MCP client despite the dashboard showing it RUNNING.
+
+### Reproducer
+
+1. Add a new workspace (`javalens-mcp`) → manager allocates port 8806, spawns resident JVM, dashboard shows ALL RUNNING.
+2. Restart Claude Code → `/mcp` lists only the previously deployed `jl-strategies-orb`. No `jl-javalens-mcp`.
+
+### Expected
+
+Workspace mutations (add / rename / delete) keep deployed client configs in sync — either by re-running the deploy writer automatically, or at minimum by surfacing a visible "deployed configs out of date" indicator in the dashboard.
+
+### Actual
+
+Resident-JVM lifecycle is automatic on workspace add; the client-config write happens ONLY on a manual "Deploy to Agents" click. Nothing flags the drift. Verified live: `~/.gemini/antigravity/mcp_config.json` mtime (2026-06-10 hand-patch) proves no deploy ran, while the 8806 resident was up and healthy.
+
+### Second defect (code inspection, same area)
+
+`build_deploy_servers` (`manager_service.rs` ~1338): `resolve_runtime_reference_with(...).ok()?` inside the per-workspace `filter_map` — any resolve error silently OMITS that workspace from the deploy set with no validation error and no log. A partial deploy looks like a successful one.
+
+### Suspected fix
+
+Hook the deploy writer (or a staleness flag) into the same workspace-mutation paths that manage residents (add/rename/delete — adjacent to bugs #11/#12 fix sites); replace the silent `.ok()?` with an error collected into `validation_errors` so partial deploys are visible.
+
+---
+
 ## #13 — `QuitAction::Quit` exits without stopping resident JVMs
 
 - **Status:** OPEN (targeted: v0.15.2)
@@ -55,7 +86,7 @@ Call `release_workspace_state` from both deletion paths; cover with `cargo test`
 ## #11 — `rename_workspace` orphans the old name's port/token entry and silently allocates a new port
 
 - **Status:** OPEN (targeted: v0.15.2)
-- **Date observed:** 2026-06-09 (lifecycle audit; user's live `projects.json` carries 4 orphaned entries from a rename chain `orb-strategies` → `ORB_strategies` → `strategies_orb` → `strategies-orb`, ports 8802-8805)
+- **Date observed:** 2026-06-09 (lifecycle audit). Live `projects.json` count as of 2026-06-11: 7 `workspaces[]` entries for 2 real workspaces — **5 orphans**: 8802/8803/8804 from the rename chain `orb-strategies` → `ORB_strategies` → `strategies_orb` → (live) `strategies-orb`@8805, plus 8800 `JAVALENS-WS` + 8801 `JATS-ORB-WS` from deleted workspaces (bug #12's evidence). Live: 8805 + 8806.
 - **Reporter:** Harald (audit directive); confirmed in live config + code inspection.
 - **Environment:** javalens-manager v0.15.1, `~/.config/javalens-manager/projects.json`.
 - **Severity:** MEDIUM-HIGH — every rename leaks a port AND breaks already-deployed MCP-client configs (the new name allocates a fresh port, so deployed URL entries point at the old port where nothing listens after restart).
