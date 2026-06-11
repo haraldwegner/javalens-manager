@@ -2395,17 +2395,20 @@ fn validate_client_config_shape(
 
         // Sprint 15 v0.15.0 hotfix: post-write validator was written
         // when entries had stdio `command` + `args`. URL entries don't
-        // carry those — they have `url` + `headers.Authorization`. The
-        // shape check now matches whichever form the writer emitted.
+        // carry those — they have `url` + `headers.Authorization`.
+        // Sprint 16 (bugs.md #10): the URL field name is per-client —
+        // antigravity reads `serverUrl`, everyone else `url` (see
+        // managed_server_entry for the schema table).
+        let url_field = if client == "antigravity" { "serverUrl" } else { "url" };
         let url_valid = server_obj
-            .get("url")
+            .get(url_field)
             .and_then(|value| value.as_str())
             .map(|value| !value.trim().is_empty())
             .unwrap_or(false);
 
         if !url_valid {
             return Err(format!(
-                "{client}: server '{}' missing non-empty url",
+                "{client}: server '{}' missing non-empty {url_field}",
                 server.id
             ));
         }
@@ -2538,7 +2541,7 @@ fn is_javalens_managed_mcp_key(key: &str) -> bool {
 
 fn write_managed_json_block(
     path: &str,
-    _client: &str,
+    client: &str,
     servers: &[ManagedDeployServer],
     merge_mode: &McpMergeMode,
     backup_before_write: bool,
@@ -2580,25 +2583,10 @@ fn write_managed_json_block(
         }
 
         // Sprint 15 Stage 11: URL form replaces stdio command/args/env.
-        // v0.15.0 hotfix: `type: "http"` is mandatory for Claude Code,
-        // which otherwise falls through to its stdio parser and complains
-        // about missing `command`. Per the Claude Code MCP docs the spec
-        // form is `{ "type": "http", "url": "...", "headers": {...} }`.
+        // Sprint 16 (bugs.md #10): the entry shape is per-client — see
+        // managed_server_entry for the schema table.
         for server in servers {
-            let mut entry = serde_json::Map::new();
-            entry.insert("type".into(), serde_json::Value::String("http".into()));
-            entry.insert("url".into(), serde_json::Value::String(server.url.clone()));
-            entry.insert(
-                "headers".into(),
-                serde_json::json!({
-                    "Authorization": format!("Bearer {}", server.token),
-                }),
-            );
-            if server.disabled {
-                entry.insert("disabled".into(), serde_json::Value::Bool(true));
-            }
-            existing_servers
-                .insert(server.id.clone(), serde_json::Value::Object(entry));
+            existing_servers.insert(server.id.clone(), managed_server_entry(client, server));
         }
 
         if force_rewrite {
@@ -2698,30 +2686,49 @@ fn remove_managed_json_block(path: &str, backup_before_write: bool) -> Result<bo
     Ok(true)
 }
 
-fn build_client_mcp_json(client: &str, servers: &[ManagedDeployServer]) -> serde_json::Value {
-    let _ = client;
-    let server_map: serde_json::Map<String, serde_json::Value> = servers
-        .iter()
-        .map(|server| {
-            // Sprint 15 Stage 11 + v0.15.0 hotfix: URL endpoint pointing
-            // at the resident JVM the manager hosts (Stage 10). Includes
-            // `type: "http"` because Claude Code's MCP-config parser
-            // requires it — without `type`, Claude Code falls through to
-            // its stdio schema and rejects the entry as "missing command".
-            let mut entry = serde_json::Map::new();
+/// Sprint 16 (bugs.md #10): one managed MCP entry in the shape the named
+/// client's parser accepts. The schema table lives HERE so a future client
+/// costs one match arm, not a hunt across writer sites:
+///
+/// | client            | shape                                            |
+/// |-------------------|--------------------------------------------------|
+/// | antigravity       | `{ serverUrl, headers }` — NO `type` (Windsurf    |
+/// |                   | lineage rejects `type`+`url` with "serverURL or   |
+/// |                   | command must be specified"; verified 2026-06-10)  |
+/// | claude/cursor/... | `{ type: "http", url, headers }` (Claude Code     |
+/// |                   | falls through to its stdio parser without `type`) |
+///
+/// `disabled: true` is accepted by all targets and stays client-agnostic.
+fn managed_server_entry(client: &str, server: &ManagedDeployServer) -> serde_json::Value {
+    let mut entry = serde_json::Map::new();
+    match client {
+        "antigravity" => {
+            entry.insert(
+                "serverUrl".into(),
+                serde_json::Value::String(server.url.clone()),
+            );
+        }
+        _ => {
             entry.insert("type".into(), serde_json::Value::String("http".into()));
             entry.insert("url".into(), serde_json::Value::String(server.url.clone()));
-            entry.insert(
-                "headers".into(),
-                serde_json::json!({
-                    "Authorization": format!("Bearer {}", server.token),
-                }),
-            );
-            if server.disabled {
-                entry.insert("disabled".into(), serde_json::Value::Bool(true));
-            }
-            (server.id.clone(), serde_json::Value::Object(entry))
-        })
+        }
+    }
+    entry.insert(
+        "headers".into(),
+        serde_json::json!({
+            "Authorization": format!("Bearer {}", server.token),
+        }),
+    );
+    if server.disabled {
+        entry.insert("disabled".into(), serde_json::Value::Bool(true));
+    }
+    serde_json::Value::Object(entry)
+}
+
+fn build_client_mcp_json(client: &str, servers: &[ManagedDeployServer]) -> serde_json::Value {
+    let server_map: serde_json::Map<String, serde_json::Value> = servers
+        .iter()
+        .map(|server| (server.id.clone(), managed_server_entry(client, server)))
         .collect();
 
     serde_json::json!({
@@ -3265,6 +3272,67 @@ mod tests {
             .as_object()
             .expect("mcpServers must always be an object");
         assert!(map.is_empty(), "no servers must serialize to an empty map");
+    }
+
+    #[test]
+    fn deploy_writer_antigravity_emits_serverurl_shape() {
+        // Sprint 16 (bugs.md #10): Antigravity's Windsurf-lineage parser
+        // rejects `type`+`url` ("serverURL or command must be specified");
+        // it wants `serverUrl` and no `type`. Verified live 2026-06-10.
+        let servers = vec![url_server("jl-ws", 8805, "tok", false)];
+        let json = build_client_mcp_json("antigravity", &servers);
+        let entry = &json["mcpServers"]["jl-ws"];
+
+        assert_eq!(entry["serverUrl"], "http://127.0.0.1:8805/mcp");
+        assert!(entry.get("url").is_none(), "antigravity must not get `url`");
+        assert!(entry.get("type").is_none(), "antigravity must not get `type`");
+        assert_eq!(entry["headers"]["Authorization"], "Bearer tok");
+    }
+
+    #[test]
+    fn deploy_writer_antigravity_honours_disabled_flag() {
+        let servers = vec![url_server("jl-ws", 8805, "tok", true)];
+        let json = build_client_mcp_json("antigravity", &servers);
+        let entry = &json["mcpServers"]["jl-ws"];
+        assert_eq!(entry["disabled"], serde_json::Value::Bool(true));
+        assert_eq!(entry["serverUrl"], "http://127.0.0.1:8805/mcp");
+    }
+
+    #[test]
+    fn deploy_writer_claude_cursor_shape_unchanged_by_per_client_branch() {
+        // The v0.15.1 shape stays byte-stable for claude + cursor.
+        for client in ["claude", "cursor"] {
+            let servers = vec![url_server("jl-ws", 8805, "tok", false)];
+            let json = build_client_mcp_json(client, &servers);
+            let entry = &json["mcpServers"]["jl-ws"];
+            assert_eq!(entry["type"], "http", "{client} keeps type");
+            assert_eq!(entry["url"], "http://127.0.0.1:8805/mcp", "{client} keeps url");
+            assert!(entry.get("serverUrl").is_none(), "{client} must not get serverUrl");
+        }
+    }
+
+    #[test]
+    fn validator_accepts_per_client_shapes() {
+        let servers = vec![url_server("jl-ws", 8805, "tok", false)];
+
+        let antigravity_json = build_client_mcp_json("antigravity", &servers);
+        assert!(
+            validate_client_config_shape("antigravity", &antigravity_json, &servers).is_ok(),
+            "validator must accept the antigravity serverUrl shape"
+        );
+
+        let claude_json = build_client_mcp_json("claude", &servers);
+        assert!(
+            validate_client_config_shape("claude", &claude_json, &servers).is_ok(),
+            "validator must accept the claude type+url shape"
+        );
+
+        // Cross-shape must FAIL: a claude-shaped entry handed to the
+        // antigravity validator means the per-client branch regressed.
+        assert!(
+            validate_client_config_shape("antigravity", &claude_json, &servers).is_err(),
+            "antigravity validator must reject a url-shaped entry"
+        );
     }
 
     #[test]

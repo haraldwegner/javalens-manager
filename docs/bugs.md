@@ -41,7 +41,7 @@ Hook the deploy writer (or a staleness flag) into the same workspace-mutation pa
 
 ## #13 — `QuitAction::Quit` exits without stopping resident JVMs
 
-- **Status:** OPEN (targeted: v0.15.2)
+- **Status:** OPEN (targeted: v0.16.0 — absorbed from the superseded v0.15.2 plan)
 - **Date observed:** 2026-06-09 (lifecycle audit after v0.15.1 ship)
 - **Reporter:** Harald (audit directive); confirmed by code inspection.
 - **Environment:** javalens-manager v0.15.1, Pop!_OS 22.04.
@@ -63,7 +63,7 @@ Every quit path stops the resident JVMs the manager spawned (they are manager-ow
 
 ## #12 — `delete_workspace` / `delete_project` never release the workspace's port + token
 
-- **Status:** OPEN (targeted: v0.15.2)
+- **Status:** OPEN (targeted: v0.16.0 — absorbed from the superseded v0.15.2 plan)
 - **Date observed:** 2026-06-09 (lifecycle audit after v0.15.1 ship)
 - **Reporter:** Harald (audit directive); confirmed by code inspection.
 - **Environment:** javalens-manager v0.15.1.
@@ -85,7 +85,7 @@ Call `release_workspace_state` from both deletion paths; cover with `cargo test`
 
 ## #11 — `rename_workspace` orphans the old name's port/token entry and silently allocates a new port
 
-- **Status:** OPEN (targeted: v0.15.2)
+- **Status:** OPEN (targeted: v0.16.0 — absorbed from the superseded v0.15.2 plan)
 - **Date observed:** 2026-06-09 (lifecycle audit). Live `projects.json` count as of 2026-06-11: 7 `workspaces[]` entries for 2 real workspaces — **5 orphans**: 8802/8803/8804 from the rename chain `orb-strategies` → `ORB_strategies` → `strategies_orb` → (live) `strategies-orb`@8805, plus 8800 `JAVALENS-WS` + 8801 `JATS-ORB-WS` from deleted workspaces (bug #12's evidence). Live: 8805 + 8806.
 - **Reporter:** Harald (audit directive); confirmed in live config + code inspection.
 - **Environment:** javalens-manager v0.15.1, `~/.config/javalens-manager/projects.json`.
@@ -107,7 +107,7 @@ Rename migrates the `workspaces[]` entry key in the same transaction. One-shot m
 
 ## #10 — MCP-config writer emits one schema for all clients; Antigravity rejects it ("serverURL or command must be specified")
 
-- **Status:** OPEN (targeted: v0.15.2). Live workaround in place: user's `~/.gemini/antigravity/mcp_config.json` hand-patched 2026-06-10 (backup `.bak-pre-serverurl`); **any manager re-deploy reverts the workaround**.
+- **Status:** IN_PROGRESS — per-client writer + validator landed Stage B0 (2026-06-12, `managed_server_entry` schema table); flips to FIXED at the v0.16.0 release. Live workaround until then: user's `~/.gemini/antigravity/mcp_config.json` hand-patched 2026-06-10 (backup `.bak-pre-serverurl`); a re-deploy from a PRE-B0 build would still revert it.
 - **Date observed:** 2026-06-10 (live Antigravity verification of the v0.15.1 pair)
 - **Reporter:** Harald.
 - **Environment:** javalens-manager v0.15.1, fork v1.8.6, Antigravity (daily channel), Pop!_OS 22.04.
