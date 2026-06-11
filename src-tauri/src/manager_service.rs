@@ -278,6 +278,9 @@ impl ManagerService {
     pub fn add_project(&self, input: AddProjectInput) -> Result<ProjectRecord, String> {
         let project = self.config_store.add_project(input)?;
         self.write_workspace_json_for(&project.workspace_name)?;
+        // Sprint 16 (bugs.md #14a): keep already-deployed client configs
+        // in sync with workspace mutations.
+        self.refresh_deployed_configs();
         Ok(project)
     }
 
@@ -334,6 +337,9 @@ impl ManagerService {
         // JDT data dir + workspace.json are left in place for the user to
         // clean up via delete_workspace if they were running there.
         self.write_workspace_json_for(&input.new_name)?;
+        // Sprint 16 (bugs.md #14a): the MCP server id derives from the
+        // workspace name — deployed configs must follow the rename.
+        self.refresh_deployed_configs();
         self.load_dashboard()
     }
 
@@ -362,6 +368,13 @@ impl ManagerService {
             let _ = std::fs::remove_dir_all(&workspace_dir);
         }
 
+        // Sprint 16 (bugs.md #12): free the resident (port, token) entry —
+        // the allocator pool no longer shrinks with every deletion.
+        self.config_store.release_workspace_state(workspace_name)?;
+        // Sprint 16 (bugs.md #14a): drop the deleted workspace's entry
+        // from already-deployed client configs.
+        self.refresh_deployed_configs();
+
         self.load_dashboard()
     }
 
@@ -382,6 +395,22 @@ impl ManagerService {
             // Rewrite (or remove) the workspace.json based on whether
             // any members remain.
             self.write_workspace_json_for(&ws)?;
+
+            // Sprint 16 (bugs.md #12): when the last member leaves, the
+            // workspace is gone — stop its resident and free its
+            // (port, token) entry, same as delete_workspace.
+            let any_members_left = self
+                .config_store
+                .list_projects()
+                .iter()
+                .any(|p| p.workspace_name == ws);
+            if !any_members_left {
+                self.runtime_manager.stop_workspace_runtime(&ws)?;
+                self.config_store.release_workspace_state(&ws)?;
+            }
+            // Sprint 16 (bugs.md #14a): deployed configs follow the change
+            // (member list shrank, or the whole workspace disappeared).
+            self.refresh_deployed_configs();
         }
         self.load_dashboard()
     }
@@ -538,7 +567,7 @@ impl ManagerService {
         let started_at = Instant::now();
         let settings = self.config_store.get_settings();
         let projects = self.config_store.list_projects();
-        let servers = self.build_deploy_servers(&settings, &projects);
+        let (servers, resolve_errors) = self.build_deploy_servers(&settings, &projects);
         let clients = self.deploy_targets_for_settings(&settings);
         let requested_targets: Option<HashSet<String>> =
             input.target_clients.as_ref().map(|targets| {
@@ -585,10 +614,20 @@ impl ManagerService {
             results.push(result);
         }
 
+        // Sprint 16 (bugs.md #14b): resolve failures ride on every written
+        // client result + the summary line — partial deploys are visible.
+        merge_resolve_errors(&mut results, &resolve_errors);
+
         let ok = results
             .iter()
             .all(|entry| !matches!(entry.status, DeployClientStatus::Failed));
-        let detail = if ok {
+        let detail = if !resolve_errors.is_empty() {
+            format!(
+                "Agent deploy completed, but {} workspace(s) could not be \
+                 resolved and were omitted.",
+                resolve_errors.len()
+            )
+        } else if ok {
             "Agent deploy completed.".to_string()
         } else {
             "Agent deploy completed with failures.".to_string()
@@ -1298,11 +1337,14 @@ impl ManagerService {
     /// on user-initiated deploy (the user explicitly clicked Deploy —
     /// honour that). To remove managed entries from clients, the user
     /// uses the explicit "Delete" deploy mode in the dashboard.
+    /// Sprint 16 (bugs.md #14b): returns the deploy set PLUS the resolve
+    /// errors for workspaces that could not join it. Callers surface the
+    /// errors; nothing is silently dropped anymore.
     fn build_deploy_servers(
         &self,
         settings: &ManagerSettings,
         projects: &[ProjectRecord],
-    ) -> Vec<ManagedDeployServer> {
+    ) -> (Vec<ManagedDeployServer>, Vec<String>) {
         let disabled = !settings.autostart_on_boot
             && matches!(
                 settings.mcp_disabled_writer_mode,
@@ -1328,20 +1370,30 @@ impl ManagerService {
             }
         }
 
-        by_workspace
+        let mut resolve_errors: Vec<String> = Vec::new();
+        let servers = by_workspace
             .into_iter()
             .filter_map(|(workspace_name, members)| {
                 // Pick any member to resolve the runtime (also allocates
                 // the workspace's resident_port + resident_token if not
                 // yet present — Stage 9 + 10 contract).
                 let representative = members.first()?;
-                let reference = self
-                    .resolve_runtime_reference_with(
-                        representative,
-                        settings,
-                        installed_runtime.as_ref(),
-                    )
-                    .ok()?;
+                let reference = match self.resolve_runtime_reference_with(
+                    representative,
+                    settings,
+                    installed_runtime.as_ref(),
+                ) {
+                    Ok(reference) => reference,
+                    Err(error) => {
+                        // Sprint 16 (bugs.md #14b): the pre-v0.16.0 `.ok()?`
+                        // here silently omitted the workspace — a partial
+                        // deploy looked like a successful one.
+                        resolve_errors.push(format!(
+                            "workspace '{workspace_name}' omitted from deploy: {error}"
+                        ));
+                        return None;
+                    }
+                };
                 let server_id = mcp_server_id_for_workspace(&workspace_name);
 
                 let project_names: Vec<String> = members
@@ -1365,7 +1417,47 @@ impl ManagerService {
                     disabled,
                 })
             })
-            .collect()
+            .collect();
+        (servers, resolve_errors)
+    }
+
+    /// Sprint 16 (bugs.md #14a): re-run the deploy for clients that ALREADY
+    /// hold javalens-managed entries, so deployed configs track workspace
+    /// adds / renames / deletes without a manual Deploy click. Clients that
+    /// were never deployed to are left untouched. Best-effort by design:
+    /// failures are logged and never block the workspace mutation itself.
+    fn refresh_deployed_configs(&self) {
+        let settings = self.config_store.get_settings();
+        let deployed: Vec<String> = self
+            .deploy_targets_for_settings(&settings)
+            .iter()
+            .filter(|target| {
+                target.enabled_by_settings
+                    && target
+                        .target_path
+                        .as_deref()
+                        .map(path_has_managed_entries)
+                        .unwrap_or(false)
+            })
+            .map(|target| target.id.to_string())
+            .collect();
+        if deployed.is_empty() {
+            return;
+        }
+        match self.deploy_to_agents(DeployToAgentsInput {
+            mode: DeployMode::Deploy,
+            target_clients: Some(deployed),
+        }) {
+            Ok(result) if result.ok => {}
+            Ok(result) => eprintln!(
+                "[javalens-manager] auto-refresh of deployed configs completed \
+                 with failures: {}",
+                result.detail
+            ),
+            Err(error) => eprintln!(
+                "[javalens-manager] auto-refresh of deployed configs failed: {error}"
+            ),
+        }
     }
 
     fn deploy_targets_for_settings(&self, settings: &ManagerSettings) -> Vec<DeployClientTarget> {
@@ -2539,6 +2631,39 @@ fn is_javalens_managed_mcp_key(key: &str) -> bool {
     key.starts_with("jl-") || key.starts_with("javalens-")
 }
 
+/// Sprint 16 (bugs.md #14a): true when the client's MCP config file already
+/// carries at least one javalens-managed server entry — the marker that the
+/// user deployed there before, making it an auto-refresh target.
+fn path_has_managed_entries(path: &str) -> bool {
+    let Ok(contents) = fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&contents) else {
+        return false;
+    };
+    value
+        .get("mcpServers")
+        .and_then(|servers| servers.as_object())
+        .map(|servers| servers.keys().any(|key| is_javalens_managed_mcp_key(key)))
+        .unwrap_or(false)
+}
+
+/// Sprint 16 (bugs.md #14b): attach workspace-resolve failures to every
+/// client result that actually wrote (skipped clients stay untouched), so
+/// the deploy UI shows what was omitted instead of reporting silent success.
+fn merge_resolve_errors(results: &mut [DeployClientResult], resolve_errors: &[String]) {
+    if resolve_errors.is_empty() {
+        return;
+    }
+    for result in results.iter_mut() {
+        if !matches!(result.status, DeployClientStatus::Skipped) {
+            result
+                .validation_errors
+                .extend(resolve_errors.iter().cloned());
+        }
+    }
+}
+
 fn write_managed_json_block(
     path: &str,
     client: &str,
@@ -3360,5 +3485,82 @@ mod tests {
             serde_json::from_str(&disable).unwrap();
         assert_eq!(back_remove, crate::config::WriterMode::Remove);
         assert_eq!(back_disable, crate::config::WriterMode::Disable);
+    }
+
+    // ===== Sprint 16 (bugs.md #14a): managed-entry detection =====
+
+    #[test]
+    fn path_has_managed_entries_detects_managed_keys() {
+        let dir = unique_tempdir("managed-detect");
+
+        let managed = dir.join("managed.json");
+        std::fs::write(
+            &managed,
+            r#"{ "mcpServers": { "jl-my-ws": { "url": "http://x" }, "other": {} } }"#,
+        )
+        .unwrap();
+        assert!(path_has_managed_entries(managed.to_str().unwrap()));
+
+        let foreign = dir.join("foreign.json");
+        std::fs::write(
+            &foreign,
+            r#"{ "mcpServers": { "filesystem": { "command": "npx" } } }"#,
+        )
+        .unwrap();
+        assert!(!path_has_managed_entries(foreign.to_str().unwrap()));
+
+        let empty = dir.join("empty.json");
+        std::fs::write(&empty, r#"{ "somethingElse": true }"#).unwrap();
+        assert!(!path_has_managed_entries(empty.to_str().unwrap()));
+
+        assert!(
+            !path_has_managed_entries(dir.join("missing.json").to_str().unwrap()),
+            "never-deployed clients (no file) are not refresh targets"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ===== Sprint 16 (bugs.md #14b): resolve errors must surface =====
+
+    #[test]
+    fn merge_resolve_errors_attaches_to_written_results_only() {
+        let mut results = vec![
+            DeployClientResult {
+                client: "claude".into(),
+                target_path: "/tmp/a".into(),
+                status: DeployClientStatus::Success,
+                message: "ok".into(),
+                backup_path: None,
+                changed_sections: Vec::new(),
+                validation_errors: Vec::new(),
+                preview_content: None,
+            },
+            DeployClientResult {
+                client: "cursor".into(),
+                target_path: "/tmp/b".into(),
+                status: DeployClientStatus::Skipped,
+                message: "skipped".into(),
+                backup_path: None,
+                changed_sections: Vec::new(),
+                validation_errors: Vec::new(),
+                preview_content: None,
+            },
+        ];
+        let errors = vec!["workspace 'broken-ws': no runtime installed".to_string()];
+
+        merge_resolve_errors(&mut results, &errors);
+
+        assert_eq!(
+            results[0].validation_errors, errors,
+            "written client must carry the resolve error"
+        );
+        assert!(
+            results[1].validation_errors.is_empty(),
+            "skipped client untouched"
+        );
+
+        // Empty error set is a no-op.
+        merge_resolve_errors(&mut results, &[]);
+        assert_eq!(results[0].validation_errors.len(), 1);
     }
 }

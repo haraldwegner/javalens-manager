@@ -604,7 +604,31 @@ impl ConfigStore {
                 count += 1;
             }
         }
-        if count > 0 {
+
+        // Sprint 16 (bugs.md #11): migrate the resident (port, token) entry
+        // in the same transaction so deployed endpoints stay valid across
+        // the rename. If the target name already has allocated state, the
+        // old name's entry is dropped instead — exactly one entry per
+        // workspace, never a duplicate orphan.
+        let target_has_state = projects
+            .workspaces
+            .iter()
+            .any(|w| w.workspace_name == sanitized);
+        let mut state_changed = false;
+        if target_has_state {
+            let before = projects.workspaces.len();
+            projects.workspaces.retain(|w| w.workspace_name != old_name);
+            state_changed = projects.workspaces.len() != before;
+        } else if let Some(entry) = projects
+            .workspaces
+            .iter_mut()
+            .find(|w| w.workspace_name == old_name)
+        {
+            entry.workspace_name = sanitized.clone();
+            state_changed = true;
+        }
+
+        if count > 0 || state_changed {
             write_json(&self.paths.projects_file, &*projects)?;
         }
         Ok(count)
@@ -872,6 +896,50 @@ fn read_projects(path: &Path) -> Result<ProjectsFile, String> {
         let dropped = dedupe_projects_by_id(&mut projects.projects);
         if dropped > 0 {
             migrated = true;
+        }
+        // Sprint 16 (bugs.md #11 migration): prune `workspaces[]` entries
+        // that name no current workspace — (port, token) damage left by
+        // pre-v0.16.0 rename/delete leaks. The file is backed up before
+        // the first pruning writeback; a clean file is left untouched.
+        let live_names: std::collections::HashSet<String> = projects
+            .projects
+            .iter()
+            .map(|p| p.workspace_name.clone())
+            .collect();
+        let orphans: Vec<crate::resident::WorkspaceState> = projects
+            .workspaces
+            .iter()
+            .filter(|w| !live_names.contains(&w.workspace_name))
+            .cloned()
+            .collect();
+        if !orphans.is_empty() {
+            let backup = format!(
+                "{}.bak-{}",
+                path.display(),
+                current_timestamp_string()
+            );
+            match fs::copy(path, &backup) {
+                Ok(_) => {
+                    for orphan in &orphans {
+                        eprintln!(
+                            "[javalens-manager] pruning orphaned workspace state \
+                             '{}' (port {}) — names no current workspace",
+                            orphan.workspace_name, orphan.resident_port
+                        );
+                    }
+                    projects
+                        .workspaces
+                        .retain(|w| live_names.contains(&w.workspace_name));
+                    migrated = true;
+                }
+                Err(error) => {
+                    // No backup → no prune. Keep the data; retry next load.
+                    eprintln!(
+                        "[javalens-manager] skipping orphan prune — backup to {backup} \
+                         failed: {error}"
+                    );
+                }
+            }
         }
         if migrated {
             // Best-effort writeback so the next read sees clean data.
@@ -1598,6 +1666,15 @@ mod tests {
                 ),
                 settings: Mutex::new(read_settings(&paths.settings_file, &paths).expect("settings")),
             };
+            // Sprint 16: workspace state only persists while a project
+            // names the workspace — the orphan prune on load enforces it.
+            store
+                .add_project(AddProjectInput {
+                    name: "Alpha".into(),
+                    project_path: "/projects/alpha".into(),
+                    workspace_name: "alpha".into(),
+                })
+                .expect("seed project");
             store
                 .get_or_allocate_workspace_state("alpha")
                 .expect("alloc")
@@ -1658,6 +1735,145 @@ mod tests {
             .release_workspace_state("nonexistent")
             .expect("release ok")
             .is_none());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ===== Sprint 16 (bugs.md #11): rename migrates resident state =====
+
+    #[test]
+    fn rename_workspace_migrates_resident_state() {
+        let dir = unique_tempdir("rename-migrate");
+        let store = store_with_empty_state(&dir);
+        store
+            .add_project(AddProjectInput {
+                name: "Alpha".into(),
+                project_path: "/projects/alpha".into(),
+                workspace_name: "old-ws".into(),
+            })
+            .unwrap();
+        let allocated = store.get_or_allocate_workspace_state("old-ws").unwrap();
+
+        store.rename_workspace("old-ws", "new-ws".into()).unwrap();
+
+        let migrated = store
+            .get_workspace_state("new-ws")
+            .expect("state must follow the rename");
+        assert_eq!(migrated.resident_port, allocated.resident_port, "same port");
+        assert_eq!(migrated.resident_token, allocated.resident_token, "same token");
+        assert!(
+            store.get_workspace_state("old-ws").is_none(),
+            "no orphan under the old name"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rename_workspace_into_existing_state_drops_stale_entry() {
+        // If the target name somehow already has allocated state, the old
+        // name's entry is released rather than left as a duplicate orphan.
+        let dir = unique_tempdir("rename-collide");
+        let store = store_with_empty_state(&dir);
+        store
+            .add_project(AddProjectInput {
+                name: "Alpha".into(),
+                project_path: "/projects/alpha".into(),
+                workspace_name: "old-ws".into(),
+            })
+            .unwrap();
+        let _old = store.get_or_allocate_workspace_state("old-ws").unwrap();
+        let existing_new = store.get_or_allocate_workspace_state("new-ws").unwrap();
+
+        store.rename_workspace("old-ws", "new-ws".into()).unwrap();
+
+        let states = store.list_workspace_states();
+        assert_eq!(states.len(), 1, "exactly one entry survives: {states:?}");
+        assert_eq!(states[0].workspace_name, "new-ws");
+        assert_eq!(states[0].resident_port, existing_new.resident_port,
+            "the pre-existing target allocation wins");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ===== Sprint 16 (bugs.md #11 migration): orphan prune on load =====
+
+    fn projects_json_with_orphans(dir: &Path) -> PathBuf {
+        let path = dir.join("projects.json");
+        let raw = r#"{
+          "version": 1,
+          "projects": [
+            {
+              "id": "p1",
+              "name": "Alpha",
+              "projectPath": "/projects/alpha",
+              "workspaceName": "live-ws",
+              "assignedPort": 0
+            }
+          ],
+          "workspaces": [
+            { "workspaceName": "live-ws", "residentPort": 8805, "residentToken": "tok-live" },
+            { "workspaceName": "ghost-a", "residentPort": 8800, "residentToken": "tok-a" },
+            { "workspaceName": "ghost-b", "residentPort": 8801, "residentToken": "tok-b" }
+          ]
+        }"#;
+        fs::write(&path, raw).unwrap();
+        path
+    }
+
+    fn backup_count(dir: &Path) -> usize {
+        fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("projects.json.bak-")
+            })
+            .count()
+    }
+
+    #[test]
+    fn read_projects_prunes_orphaned_workspace_states() {
+        let dir = unique_tempdir("prune-orphans");
+        let path = projects_json_with_orphans(&dir);
+
+        let parsed = read_projects(&path).unwrap();
+
+        assert_eq!(parsed.workspaces.len(), 1, "only the live entry survives");
+        assert_eq!(parsed.workspaces[0].workspace_name, "live-ws");
+        assert_eq!(parsed.workspaces[0].resident_port, 8805);
+        assert_eq!(backup_count(&dir), 1, "pruning write must back up first");
+
+        // The pruned file persists — a second read finds nothing to prune
+        // and creates no second backup (idempotent).
+        let reread = read_projects(&path).unwrap();
+        assert_eq!(reread.workspaces.len(), 1);
+        assert_eq!(backup_count(&dir), 1, "no second backup on clean re-read");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_projects_prune_keeps_all_when_no_orphans() {
+        let dir = unique_tempdir("prune-noop");
+        let path = dir.join("projects.json");
+        let raw = r#"{
+          "version": 1,
+          "projects": [
+            {
+              "id": "p1",
+              "name": "Alpha",
+              "projectPath": "/projects/alpha",
+              "workspaceName": "live-ws",
+              "assignedPort": 0
+            }
+          ],
+          "workspaces": [
+            { "workspaceName": "live-ws", "residentPort": 8805, "residentToken": "tok-live" }
+          ]
+        }"#;
+        fs::write(&path, raw).unwrap();
+
+        let parsed = read_projects(&path).unwrap();
+        assert_eq!(parsed.workspaces.len(), 1);
+        assert_eq!(backup_count(&dir), 0, "no orphans → no backup, no rewrite");
         let _ = fs::remove_dir_all(&dir);
     }
 }

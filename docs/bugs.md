@@ -10,7 +10,7 @@ For each entry include: ID, date observed, severity, reproducer, expected vs act
 
 ## #14 — Deployed client configs go stale on workspace add (no auto-redeploy, no drift indicator) + writer silently drops unresolvable workspaces
 
-- **Status:** OPEN (targeted: v0.16.0)
+- **Status:** IN_PROGRESS — landed Stage B1 (2026-06-12): workspace mutations (add/rename/delete) auto-refresh clients that already hold managed entries (`refresh_deployed_configs`); `build_deploy_servers` returns resolve errors that ride on client results + the deploy summary. Flips to FIXED at the v0.16.0 release.
 - **Date observed:** 2026-06-11 (live: added `javalens-mcp` workspace)
 - **Reporter:** Harald.
 - **Environment:** javalens-manager v0.15.1, fork v1.8.6, Pop!_OS 22.04.
@@ -41,7 +41,7 @@ Hook the deploy writer (or a staleness flag) into the same workspace-mutation pa
 
 ## #13 — `QuitAction::Quit` exits without stopping resident JVMs
 
-- **Status:** OPEN (targeted: v0.16.0 — absorbed from the superseded v0.15.2 plan)
+- **Status:** IN_PROGRESS — landed Stage B1 (2026-06-12); flips to FIXED at the v0.16.0 release. (Absorbed from the superseded v0.15.2 plan.)
 - **Date observed:** 2026-06-09 (lifecycle audit after v0.15.1 ship)
 - **Reporter:** Harald (audit directive); confirmed by code inspection.
 - **Environment:** javalens-manager v0.15.1, Pop!_OS 22.04.
@@ -63,7 +63,7 @@ Every quit path stops the resident JVMs the manager spawned (they are manager-ow
 
 ## #12 — `delete_workspace` / `delete_project` never release the workspace's port + token
 
-- **Status:** OPEN (targeted: v0.16.0 — absorbed from the superseded v0.15.2 plan)
+- **Status:** IN_PROGRESS — landed Stage B1 (2026-06-12); flips to FIXED at the v0.16.0 release. (Absorbed from the superseded v0.15.2 plan.)
 - **Date observed:** 2026-06-09 (lifecycle audit after v0.15.1 ship)
 - **Reporter:** Harald (audit directive); confirmed by code inspection.
 - **Environment:** javalens-manager v0.15.1.
@@ -85,7 +85,7 @@ Call `release_workspace_state` from both deletion paths; cover with `cargo test`
 
 ## #11 — `rename_workspace` orphans the old name's port/token entry and silently allocates a new port
 
-- **Status:** OPEN (targeted: v0.16.0 — absorbed from the superseded v0.15.2 plan)
+- **Status:** IN_PROGRESS — landed Stage B1 (2026-06-12); flips to FIXED at the v0.16.0 release. (Absorbed from the superseded v0.15.2 plan.)
 - **Date observed:** 2026-06-09 (lifecycle audit). Live `projects.json` count as of 2026-06-11: 7 `workspaces[]` entries for 2 real workspaces — **5 orphans**: 8802/8803/8804 from the rename chain `orb-strategies` → `ORB_strategies` → `strategies_orb` → (live) `strategies-orb`@8805, plus 8800 `JAVALENS-WS` + 8801 `JATS-ORB-WS` from deleted workspaces (bug #12's evidence). Live: 8805 + 8806.
 - **Reporter:** Harald (audit directive); confirmed in live config + code inspection.
 - **Environment:** javalens-manager v0.15.1, `~/.config/javalens-manager/projects.json`.

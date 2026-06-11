@@ -246,6 +246,12 @@ pub fn perform_quit_action(
             Ok(())
         }
         QuitAction::Quit => {
+            // Sprint 16 (bugs.md #13): residents are manager-owned — no
+            // quit path may orphan them. Best-effort: a stop failure is
+            // logged by the service layer and never blocks the exit.
+            if state.manager_service.has_running_services() {
+                let _ = state.manager_service.stop_all_runtimes();
+            }
             app.exit(0);
             Ok(())
         }
