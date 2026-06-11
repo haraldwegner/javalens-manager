@@ -1,15 +1,16 @@
 # Sprint 16 Backlog
 
-> **Status: drafted 2026-06-07** as the second release after Sprint 14 closed end-to-end. Originally these two requirements were part of Sprint 15 ([`sprint-15-backlog.md`](sprint-15-backlog.md)), but Sprint 15 re-scoped to bug #8 + bug #9 PRIMARY fix end-to-end (coupled with fork [Sprint 14a](../../../javalens-mcp/docs/sprints/sprint-14a-http-sse-transport.md) → v1.8.5 HTTP/SSE default). Windows installer + scan-folder pushed here.
+> **Status: drafted 2026-06-07; scope expanded 2026-06-12.** Originally these two requirements were part of Sprint 15 ([`sprint-15-backlog.md`](sprint-15-backlog.md)), but Sprint 15 re-scoped to bug #8 + bug #9 PRIMARY fix end-to-end (coupled with fork [Sprint 14a](../../../javalens-mcp/docs/sprints/sprint-14a-http-sse-transport.md) → v1.8.5 HTTP/SSE default). Windows installer + scan-folder pushed here. **2026-06-12 expansion: absorbs the superseded [v0.15.2 hotfix scope](sprint-15.2-hotfix-backlog.md) — bugs #10–#14 ship here instead of a standalone patch.**
 >
-> Targets manager **v0.16.0**. Manager-only sprint; the GOJA rebrand and fork-side architectural work proceed independently.
+> Targets manager **v0.16.0**. Manager-only sprint; the GOJA rebrand and fork-side architectural work proceed independently. Actionable plan: `~/.claude/plans/make-a-plan-happy-fern.md` (Phase B).
 
 ## Goal
 
-Ship **manager v0.16.0** as Latest on GitHub. Two requirements:
+Ship **manager v0.16.0** as Latest on GitHub. Three requirement groups:
 
 1. **Expand the platform matrix to Windows** — Windows ARM + Windows x64 alongside the existing Linux amd64 / Linux arm64 / macOS Apple Silicon builds. Adds the missing major desktop OS.
-2. **Add "Scan folder for projects" mode to the Add Project form** — fixes the UX gap surfaced during Sprint 14 live smoke ("I keep my Java repos under `~/Projects`, point the manager there" doesn't work without first writing a `.code-workspace` file).
+2. **Add "Scan folder for projects" to the Add Project form** — fixes the UX gap surfaced during Sprint 14 live smoke ("I keep my Java repos under `~/Projects`, point the manager there" doesn't work without first writing a `.code-workspace` file). **UX decided 2026-06-11 ("mixture to save space"): no separate mode section — a "Recursive search (autoscan)" checkbox under the Project path field; when checked, Browse autoscans the picked folder, the submit button relabels to "Discover" (for hand-typed paths/rescans), results unfold inline into the existing candidate checkbox-list, Name disables.**
+3. **Lifecycle + deploy-correctness bug bundle (absorbed from v0.15.2)** — [bugs #10–#14](../bugs.md): per-client MCP writer schema (Antigravity `serverUrl`), `rename_workspace` migrates the port/token entry, delete paths call `release_workspace_state`, `QuitAction::Quit` stops residents, one-shot `workspaces[]` orphan prune (5 known live orphans), deploy-config staleness on workspace mutations + the silent `.ok()?` drop in `build_deploy_servers`.
 
 ## Requirements
 

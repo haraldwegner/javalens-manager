@@ -1,6 +1,13 @@
 # Sprint 15.2 — Lifecycle hotfix bundle (v0.15.2)
 
-> **Status: drafted 2026-06-11** from the post-v0.15.1 lifecycle audit (2026-06-09) + live three-client verification (2026-06-10). Patch release on the Sprint 15 line; Sprint 16 (Windows installer + scan-folder) is unaffected and remains next.
+> **Status: SUPERSEDED 2026-06-11 — never executed as a standalone release.** The
+> rollout was pushed back and the full scope (bugs #10–#13, plus #14 found later the
+> same day) was absorbed into **Sprint 16 → v0.16.0** per Harald's decision; see
+> [`sprint-16-backlog.md`](sprint-16-backlog.md). The fork-side companion
+> (`readOnlyHint`) shipped in fork v1.9.0 (Sprint 14b) instead of a separate v1.8.7.
+> This file is retained as the requirements record for the absorbed scope.
+>
+> **Status (historical): drafted 2026-06-11** from the post-v0.15.1 lifecycle audit (2026-06-09) + live three-client verification (2026-06-10). Patch release on the Sprint 15 line; Sprint 16 (Windows installer + scan-folder) is unaffected and remains next.
 >
 > **Target version: javalens-manager v0.15.2.** Pure bug-fix patch — no new features, no settings, no UI.
 >
