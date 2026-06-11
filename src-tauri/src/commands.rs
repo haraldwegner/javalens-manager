@@ -132,6 +132,17 @@ pub fn discover_workspace_projects(
         .discover_workspace_projects(&workspace_file)
 }
 
+/// Sprint 16: autoscan — scan an arbitrary folder for Java projects
+/// (no `.code-workspace` seed). Feeds the same candidate-list UX as
+/// discover_workspace_projects.
+#[tauri::command]
+pub fn scan_folder_for_projects(
+    state: State<'_, AppState>,
+    folder: String,
+) -> Result<Vec<WorkspaceProjectCandidate>, String> {
+    state.manager_service.scan_folder_for_projects(&folder)
+}
+
 #[tauri::command]
 pub fn import_workspace_projects(
     state: State<'_, AppState>,

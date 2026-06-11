@@ -381,6 +381,7 @@ pub fn run() {
             commands::set_autostart_on_boot,
             commands::delete_all_projects,
             commands::discover_workspace_projects,
+            commands::scan_folder_for_projects,
             commands::import_workspace_projects,
             commands::update_settings,
             commands::redetect_mcp_client_paths,

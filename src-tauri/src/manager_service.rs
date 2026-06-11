@@ -952,64 +952,18 @@ impl ManagerService {
         &self,
         workspace_file: &str,
     ) -> Result<Vec<WorkspaceProjectCandidate>, String> {
-        let roots = read_workspace_roots(workspace_file)?;
-        let mut by_path: HashMap<String, WorkspaceProjectCandidate> = HashMap::new();
+        // Sprint 16: thin wrapper — the walk/detect/nested-filter core moved
+        // to scan_directory_for_java_projects, shared with the autoscan flow.
+        scan_directory_for_java_projects(&read_workspace_roots(workspace_file)?)
+    }
 
-        for root in roots {
-            if !root.exists() {
-                continue;
-            }
-            for entry in WalkDir::new(&root)
-                .follow_links(false)
-                .max_depth(6)
-                .into_iter()
-                .filter_entry(should_walk_entry)
-            {
-                let entry = entry.map_err(|error| format!("workspace scan failed: {error}"))?;
-                if !entry.file_type().is_dir() {
-                    continue;
-                }
-                let path = entry.path();
-                if is_ignored_candidate_path(path) {
-                    continue;
-                }
-                if let Some(kind) = detect_java_project_kind(path) {
-                    let key = path.to_string_lossy().to_string();
-                    by_path
-                        .entry(key.clone())
-                        .or_insert_with(|| WorkspaceProjectCandidate {
-                            name: path
-                                .file_name()
-                                .map(|n| n.to_string_lossy().to_string())
-                                .unwrap_or_else(|| "project".into()),
-                            project_path: key,
-                            kind,
-                        });
-                }
-            }
-        }
-
-        let mut candidates: Vec<_> = by_path.into_values().collect();
-        candidates.sort_by(|a, b| {
-            let al = a.project_path.len();
-            let bl = b.project_path.len();
-            al.cmp(&bl).then(a.project_path.cmp(&b.project_path))
-        });
-
-        // Keep only containing project roots; drop nested children.
-        let mut filtered: Vec<WorkspaceProjectCandidate> = Vec::new();
-        for candidate in candidates {
-            let candidate_path = PathBuf::from(&candidate.project_path);
-            let is_nested = filtered
-                .iter()
-                .map(|parent| PathBuf::from(&parent.project_path))
-                .any(|parent| candidate_path != parent && candidate_path.starts_with(&parent));
-            if !is_nested {
-                filtered.push(candidate);
-            }
-        }
-        filtered.sort_by(|a, b| a.project_path.cmp(&b.project_path));
-        Ok(filtered)
+    /// Sprint 16: autoscan backend — scan an arbitrary folder for Java
+    /// projects, no `.code-workspace` seed required.
+    pub fn scan_folder_for_projects(
+        &self,
+        folder: &str,
+    ) -> Result<Vec<WorkspaceProjectCandidate>, String> {
+        scan_folder_for_projects_at(folder)
     }
 
     /// Imports selected projects from a workspace into a target workspace.
@@ -2211,6 +2165,96 @@ fn parse_services_from_json_file(path: &Path) -> Result<Vec<String>, String> {
     services.sort();
     services.dedup();
     Ok(services)
+}
+
+/// Sprint 16: the discovery core — walk each root (depth ≤ 6), detect Java
+/// project kinds, dedupe, and keep only containing roots (nested children
+/// collapse into their parent). A root that is itself a Java project counts:
+/// WalkDir yields the root entry first. Shared by the `.code-workspace`
+/// discover flow and the autoscan folder scan.
+fn scan_directory_for_java_projects(
+    roots: &[PathBuf],
+) -> Result<Vec<WorkspaceProjectCandidate>, String> {
+    let mut by_path: HashMap<String, WorkspaceProjectCandidate> = HashMap::new();
+
+    for root in roots {
+        if !root.exists() {
+            continue;
+        }
+        for entry in WalkDir::new(root)
+            .follow_links(false)
+            .max_depth(6)
+            .into_iter()
+            .filter_entry(should_walk_entry)
+        {
+            let entry = entry.map_err(|error| format!("workspace scan failed: {error}"))?;
+            if !entry.file_type().is_dir() {
+                continue;
+            }
+            let path = entry.path();
+            if is_ignored_candidate_path(path) {
+                continue;
+            }
+            if let Some(kind) = detect_java_project_kind(path) {
+                let key = path.to_string_lossy().to_string();
+                by_path
+                    .entry(key.clone())
+                    .or_insert_with(|| WorkspaceProjectCandidate {
+                        name: path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "project".into()),
+                        project_path: key,
+                        kind,
+                    });
+            }
+        }
+    }
+
+    let mut candidates: Vec<_> = by_path.into_values().collect();
+    candidates.sort_by(|a, b| {
+        let al = a.project_path.len();
+        let bl = b.project_path.len();
+        al.cmp(&bl).then(a.project_path.cmp(&b.project_path))
+    });
+
+    // Keep only containing project roots; drop nested children.
+    let mut filtered: Vec<WorkspaceProjectCandidate> = Vec::new();
+    for candidate in candidates {
+        let candidate_path = PathBuf::from(&candidate.project_path);
+        let is_nested = filtered
+            .iter()
+            .map(|parent| PathBuf::from(&parent.project_path))
+            .any(|parent| candidate_path != parent && candidate_path.starts_with(&parent));
+        if !is_nested {
+            filtered.push(candidate);
+        }
+    }
+    filtered.sort_by(|a, b| a.project_path.cmp(&b.project_path));
+    Ok(filtered)
+}
+
+/// Sprint 16: expand + validate the autoscan input, then scan. `~/` resolves
+/// against the home directory (hand-typed paths; Browse always hands over
+/// absolute ones).
+fn scan_folder_for_projects_at(
+    folder: &str,
+) -> Result<Vec<WorkspaceProjectCandidate>, String> {
+    let trimmed = folder.trim();
+    if trimmed.is_empty() {
+        return Err("folder path is empty".into());
+    }
+    let expanded = if let Some(rest) = trimmed.strip_prefix("~/") {
+        dirs::home_dir()
+            .ok_or_else(|| "could not determine home directory".to_string())?
+            .join(rest)
+    } else {
+        PathBuf::from(trimmed)
+    };
+    if !expanded.is_dir() {
+        return Err(format!("not a directory: {}", expanded.display()));
+    }
+    scan_directory_for_java_projects(&[expanded])
 }
 
 fn should_walk_entry(entry: &DirEntry) -> bool {
@@ -3485,6 +3529,83 @@ mod tests {
             serde_json::from_str(&disable).unwrap();
         assert_eq!(back_remove, crate::config::WriterMode::Remove);
         assert_eq!(back_disable, crate::config::WriterMode::Disable);
+    }
+
+    // ===== Sprint 16: scan-folder backend (autoscan) =====
+
+    fn make_maven_project(root: &Path, name: &str) {
+        let dir = root.join(name);
+        std::fs::create_dir_all(dir.join("src/main/java")).unwrap();
+        std::fs::write(dir.join("pom.xml"), "<project/>").unwrap();
+    }
+
+    #[test]
+    fn scan_directory_finds_nested_projects_and_skips_junk() {
+        let dir = unique_tempdir("scan-mixed");
+        make_maven_project(&dir, "maven-app");
+        // Gradle project.
+        let gradle = dir.join("gradle-app");
+        std::fs::create_dir_all(gradle.join("src/main/java")).unwrap();
+        std::fs::write(gradle.join("build.gradle"), "").unwrap();
+        // Eclipse PDE project.
+        let eclipse = dir.join("eclipse-app");
+        std::fs::create_dir_all(&eclipse).unwrap();
+        std::fs::write(eclipse.join(".project"), "<projectDescription/>").unwrap();
+        std::fs::write(eclipse.join(".classpath"), "<classpath/>").unwrap();
+        // Plain folder — no Java signals.
+        std::fs::create_dir_all(dir.join("docs")).unwrap();
+        // Java project buried in node_modules — must be skipped by the walk.
+        make_maven_project(&dir.join("node_modules"), "fake-proj");
+
+        let candidates = scan_directory_for_java_projects(&[dir.clone()])
+            .expect("scan must succeed");
+
+        let names: Vec<&str> = candidates.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["eclipse-app", "gradle-app", "maven-app"],
+            "sorted, junk-free: {candidates:?}"
+        );
+        let kind_of = |n: &str| {
+            candidates
+                .iter()
+                .find(|c| c.name == n)
+                .map(|c| c.kind.clone())
+                .unwrap()
+        };
+        assert_eq!(kind_of("maven-app"), "maven-gradle");
+        assert_eq!(kind_of("gradle-app"), "maven-gradle");
+        assert_eq!(kind_of("eclipse-app"), "eclipse-pde");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scan_root_itself_is_a_candidate_and_children_collapse() {
+        // Browsing directly INTO a maven multi-module root: the root is the
+        // one candidate; its modules are nested children and collapse away.
+        let dir = unique_tempdir("scan-rootproj");
+        std::fs::create_dir_all(dir.join("src/main/java")).unwrap();
+        std::fs::write(dir.join("pom.xml"), "<project/>").unwrap();
+        make_maven_project(&dir, "module-a");
+
+        let candidates = scan_directory_for_java_projects(&[dir.clone()])
+            .expect("scan must succeed");
+
+        assert_eq!(candidates.len(), 1, "only the containing root: {candidates:?}");
+        assert_eq!(candidates[0].project_path, dir.to_string_lossy());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scan_folder_for_projects_at_validates_input() {
+        let missing = scan_folder_for_projects_at("/definitely/not/a/real/dir-xyz");
+        assert!(missing.is_err(), "missing dir must error");
+        assert!(missing.unwrap_err().contains("not a directory"));
+
+        assert!(
+            scan_folder_for_projects_at("   ").is_err(),
+            "blank input must error"
+        );
     }
 
     // ===== Sprint 16 (bugs.md #14a): managed-entry detection =====
