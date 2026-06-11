@@ -8,6 +8,101 @@ For each entry include: ID, date observed, severity, reproducer, expected vs act
 
 ---
 
+## #13 — `QuitAction::Quit` exits without stopping resident JVMs
+
+- **Status:** OPEN (targeted: v0.15.2)
+- **Date observed:** 2026-06-09 (lifecycle audit after v0.15.1 ship)
+- **Reporter:** Harald (audit directive); confirmed by code inspection.
+- **Environment:** javalens-manager v0.15.1, Pop!_OS 22.04.
+- **Severity:** MEDIUM — orphaned `javalens.jar` JVMs (~1.5 GB RSS each) survive manager exit and keep their ports bound; next manager start can't rebind. The leak class bug #9 closed re-enters through the exit path.
+
+### Expected
+
+Every quit path stops the resident JVMs the manager spawned (they are manager-owned lifecycle, per the v0.15.0 architecture).
+
+### Actual
+
+`commands.rs::perform_quit_action`: `QuitAction::StopAndQuit` correctly runs `stop_all_runtimes()` before `app.exit(0)`, but `QuitAction::Quit` calls `app.exit(0)` directly — residents orphan.
+
+### Suspected fix
+
+`Quit` performs a best-effort `stop_all_runtimes()` (with timeout) before exit, or the `Quit` variant is removed from the prompt in favor of `StopAndQuit` + `HideToTray`.
+
+---
+
+## #12 — `delete_workspace` / `delete_project` never release the workspace's port + token
+
+- **Status:** OPEN (targeted: v0.15.2)
+- **Date observed:** 2026-06-09 (lifecycle audit after v0.15.1 ship)
+- **Reporter:** Harald (audit directive); confirmed by code inspection.
+- **Environment:** javalens-manager v0.15.1.
+- **Severity:** MEDIUM — every deleted workspace permanently leaks one `(port, token)` entry in `projects.json`'s `workspaces[]` array. The 8800-8999 allocator range shrinks monotonically; entries are never reclaimed.
+
+### Expected
+
+Deleting a workspace (or removing its last project) releases its `workspaces[]` state so the port returns to the allocator pool.
+
+### Actual
+
+`config.rs::release_workspace_state` exists and is correct — but its only callers are tests (`config.rs` test module). `manager_service.rs::delete_workspace` stops the JVM, deletes project records, deletes the JDT data dir, and returns without releasing. `delete_project` on the last member likewise.
+
+### Suspected fix
+
+Call `release_workspace_state` from both deletion paths; cover with `cargo test` lifecycle tests.
+
+---
+
+## #11 — `rename_workspace` orphans the old name's port/token entry and silently allocates a new port
+
+- **Status:** OPEN (targeted: v0.15.2)
+- **Date observed:** 2026-06-09 (lifecycle audit; user's live `projects.json` carries 4 orphaned entries from a rename chain `orb-strategies` → `ORB_strategies` → `strategies_orb` → `strategies-orb`, ports 8802-8805)
+- **Reporter:** Harald (audit directive); confirmed in live config + code inspection.
+- **Environment:** javalens-manager v0.15.1, `~/.config/javalens-manager/projects.json`.
+- **Severity:** MEDIUM-HIGH — every rename leaks a port AND breaks already-deployed MCP-client configs (the new name allocates a fresh port, so deployed URL entries point at the old port where nothing listens after restart).
+
+### Expected
+
+Renaming a workspace migrates its `(port, token)` entry to the new name; deployed configs stay valid (same port, same token).
+
+### Actual
+
+`config.rs::rename_workspace` (line ~590) renames only `projects[].workspace_name`. The `workspaces[]` port/token array keeps the OLD name; the next `get_or_allocate_workspace_state` call for the new name allocates a fresh port + token, orphaning the old entry.
+
+### Suspected fix
+
+Rename migrates the `workspaces[]` entry key in the same transaction. One-shot migration prunes existing orphans (entries whose name matches no current workspace) — see v0.15.2 backlog item 4.
+
+---
+
+## #10 — MCP-config writer emits one schema for all clients; Antigravity rejects it ("serverURL or command must be specified")
+
+- **Status:** OPEN (targeted: v0.15.2). Live workaround in place: user's `~/.gemini/antigravity/mcp_config.json` hand-patched 2026-06-10 (backup `.bak-pre-serverurl`); **any manager re-deploy reverts the workaround**.
+- **Date observed:** 2026-06-10 (live Antigravity verification of the v0.15.1 pair)
+- **Reporter:** Harald.
+- **Environment:** javalens-manager v0.15.1, fork v1.8.6, Antigravity (daily channel), Pop!_OS 22.04.
+- **Severity:** HIGH — deploy to Antigravity produces a dead entry; one of the three supported clients cannot consume manager-deployed configs at all.
+
+### Expected
+
+Each deploy target receives the MCP-config schema its parser accepts.
+
+### Actual
+
+`manager_service.rs::build_client_mcp_json` ignores its `client` parameter (`let _ = client;`) and emits the Claude/Cursor shape `{ "type": "http", "url": ..., "headers": ... }` for every client. Antigravity (Windsurf-lineage parser) recognizes neither `type` nor `url` → "Error: serverURL or command must be specified."
+
+### Verified correct Antigravity shape (live smoke 2026-06-10: 8 tools, 0 connection errors, native HTTP — no shim needed)
+
+```json
+"jl-strategies-orb": {
+  "serverUrl": "http://127.0.0.1:<port>/mcp",
+  "headers": { "Authorization": "Bearer <token>" }
+}
+```
+
+No `type` field; `headers` and `disabled` supported. Both writer sites (`build_client_mcp_json` + `write_managed_json_block`) need the per-client branch.
+
+---
+
 ## #9 — `autostartOnBoot: false` does not prevent javalens MCP servers from auto-starting
 
 - **Status:** FIXED in v0.15.0 (PRIMARY fix, end-to-end, coupled with fork v1.8.5). Manager hosts ONE resident JVM per workspace; deployed MCP-client configs emit URL endpoints (`{ url, headers: { Authorization: Bearer <token> } }`) instead of stdio commands; `autostart_on_boot=false` strips the entries (Remove mode, default) or disables them (Disable mode). N clients × M workspaces → M JVMs total, not N×M. See [release notes v0.15.0](release-notes/v0.15.0.md). Commits: `b697617` (Stage 9 port+token allocator), `a2a6284` (Stage 10 resident JVM hosting), `3e11f19` (Stage 11 URL-emitting MCP writer).
