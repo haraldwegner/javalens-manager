@@ -4,6 +4,7 @@
   import {
     discoverWorkspaceProjects,
     importWorkspaceProjects,
+    scanFolderForProjects,
     type AddProjectInput,
     type WorkspaceProjectCandidate
   } from "../api/tauri";
@@ -31,6 +32,19 @@
   let isImporting = false;
   let lastDiscoveredFile = "";
 
+  /* Sprint 16 autoscan: one checkbox under Project path. Checked, the
+   * form flips to discovery — Browse autoscans the picked folder, the
+   * submit button relabels to "Discover" (hand-typed paths / rescans),
+   * and results unfold into the shared candidate list below. The
+   * candidate/selection/import machinery is shared with the VSCode
+   * workspace flow; candidateSource records which flow filled it so the
+   * two never fight. */
+  let autoscan = false;
+  let isScanning = false;
+  let scanMessage = "";
+  let scannedFolder = "";
+  let candidateSource: "" | "folder" | "workspace" = "";
+
   $: canDiscover =
     !disabled &&
     !isImporting &&
@@ -42,6 +56,13 @@
 
   $: canSubmit =
     name.trim().length > 0 &&
+    projectPath.trim().length > 0 &&
+    activeWorkspaceName.length > 0;
+
+  $: canScan =
+    !disabled &&
+    !isScanning &&
+    !isImporting &&
     projectPath.trim().length > 0 &&
     activeWorkspaceName.length > 0;
 
@@ -74,12 +95,63 @@
     const selected = await open({
       directory: true,
       multiple: false,
-      title: "Select Java project folder"
+      title: autoscan
+        ? "Select folder to scan for Java projects"
+        : "Select Java project folder"
     });
 
     if (typeof selected === "string") {
       projectPath = selected;
-      maybeAdoptSuggestedName(inferNameFromPath(selected));
+      if (autoscan) {
+        // Autoscan-on-Browse: picking the folder IS the trigger in the
+        // common case; the Discover button covers hand-typed paths.
+        await scanProjectFolder();
+      } else {
+        maybeAdoptSuggestedName(inferNameFromPath(selected));
+      }
+    }
+  }
+
+  /* Sprint 16: scan the Project path folder for Java projects and unfold
+   * the results into the shared candidate list. */
+  async function scanProjectFolder() {
+    const folder = projectPath.trim();
+    if (!folder) {
+      scanMessage = "Enter or browse a folder to scan first.";
+      return;
+    }
+    isScanning = true;
+    scanMessage = "";
+    importMessage = "";
+    candidates = [];
+    selectedPaths = [];
+    try {
+      candidates = await scanFolderForProjects(folder);
+      selectedPaths = candidates.map((candidate) => candidate.projectPath);
+      candidateSource = "folder";
+      scannedFolder = folder;
+      if (candidates.length === 0) {
+        scanMessage = `No Java projects found under ${folder}.`;
+      }
+    } catch (error) {
+      scanMessage = String(error);
+      candidateSource = "";
+      scannedFolder = "";
+    } finally {
+      isScanning = false;
+    }
+  }
+
+  function toggleAutoscan() {
+    autoscan = !autoscan;
+    scanMessage = "";
+    if (!autoscan && candidateSource === "folder") {
+      // Leaving autoscan mode: retire the folder-sourced results so the
+      // single-project flow returns exactly to its pre-checkbox state.
+      candidates = [];
+      selectedPaths = [];
+      candidateSource = "";
+      scannedFolder = "";
     }
   }
 
@@ -100,6 +172,7 @@
 
   async function discoverFromWorkspace() {
     importMessage = "";
+    scanMessage = "";
     const path = workspaceFile.trim();
     if (!path) {
       importMessage = "Choose a .code-workspace file first.";
@@ -108,6 +181,8 @@
     try {
       candidates = await discoverWorkspaceProjects(path);
       selectedPaths = candidates.map((candidate) => candidate.projectPath);
+      candidateSource = "workspace";
+      scannedFolder = "";
       lastDiscoveredFile = path;
       if (candidates.length === 0) {
         importMessage = "No Maven/Gradle or Eclipse/PDE Java projects found.";
@@ -126,31 +201,47 @@
   }
 
   async function importSelected() {
-    if (!workspaceFile.trim() || selectedPaths.length === 0) {
+    const fromFolder = candidateSource === "folder";
+    const source = fromFolder ? scannedFolder : workspaceFile.trim();
+    if (!source || selectedPaths.length === 0) {
       importMessage = "Select at least one discovered project.";
       return;
     }
     isImporting = true;
     importMessage = "";
+    scanMessage = "";
     try {
       const result = await importWorkspaceProjects({
-        workspaceFile: workspaceFile.trim(),
+        workspaceFile: fromFolder ? "" : source,
+        scanFolder: fromFolder ? source : "",
         selectedPaths,
         workspaceName: activeWorkspaceName
       });
-      importMessage = `Imported ${result.added.length} project(s).`;
+      let message = `Imported ${result.added.length} project(s).`;
       if (result.skipped.length > 0) {
-        importMessage += ` Skipped ${result.skipped.length}.`;
+        message += ` Skipped ${result.skipped.length}.`;
       }
       candidates = [];
       selectedPaths = [];
-      // Return the import section to its initial empty state so the buttons
+      candidateSource = "";
+      scannedFolder = "";
+      // Return both sources to their initial empty state so the buttons
       // grey out and the form is ready for the next operation.
       workspaceFile = "";
       lastDiscoveredFile = "";
+      if (fromFolder) {
+        projectPath = "";
+        scanMessage = message;
+      } else {
+        importMessage = message;
+      }
       dispatch("imported");
     } catch (error) {
-      importMessage = String(error);
+      if (fromFolder) {
+        scanMessage = String(error);
+      } else {
+        importMessage = String(error);
+      }
     } finally {
       isImporting = false;
     }
@@ -188,10 +279,14 @@
       <span>Name</span>
       <input
         bind:value={name}
-        disabled={disabled || !activeWorkspaceName}
-        placeholder="Defaults to the selected folder name"
-        required
-        title="Display name shown in the Dashboard. Auto-fills from the folder if left blank."
+        disabled={disabled || !activeWorkspaceName || autoscan}
+        placeholder={autoscan
+          ? "Names come from discovered projects"
+          : "Defaults to the selected folder name"}
+        required={!autoscan}
+        title={autoscan
+          ? "Disabled while autoscan is on — each discovered project keeps its folder name."
+          : "Display name shown in the Dashboard. Auto-fills from the folder if left blank."}
       />
     </label>
 
@@ -200,26 +295,82 @@
       <div class="field-row">
         <input
           bind:value={projectPath}
-          disabled={disabled || !activeWorkspaceName}
-          placeholder="/path/to/java/project"
+          disabled={disabled || !activeWorkspaceName || isScanning}
+          placeholder={autoscan ? "/folder/to/scan/recursively" : "/path/to/java/project"}
           required
-          title="Absolute path to the Java project root (the folder containing pom.xml, build.gradle, or .project)."
+          title={autoscan
+            ? "Folder to scan recursively (depth ≤ 6) for Java projects."
+            : "Absolute path to the Java project root (the folder containing pom.xml, build.gradle, or .project)."}
         />
         <button
-          disabled={disabled || !activeWorkspaceName}
+          disabled={disabled || !activeWorkspaceName || isScanning}
           on:click={chooseProjectFolder}
-          title="Open a folder picker to choose the Java project root"
+          title={autoscan
+            ? "Pick a folder — scanning starts immediately"
+            : "Open a folder picker to choose the Java project root"}
           type="button"
         >Browse</button>
       </div>
     </label>
 
-    <button
-      class:primary={!disabled && canSubmit}
-      disabled={disabled || !canSubmit}
-      title="Add this project to the selected workspace"
-      type="submit"
-    >Save project</button>
+    <label class="checkbox-row">
+      <input
+        checked={autoscan}
+        disabled={disabled || !activeWorkspaceName || isScanning || isImporting}
+        on:change={toggleAutoscan}
+        title="When checked, Browse scans the picked folder recursively for Java projects and lists them for import"
+        type="checkbox"
+      />
+      <span>Recursive search (autoscan)</span>
+    </label>
+
+    {#if autoscan}
+      <button
+        class:primary={canScan}
+        disabled={!canScan}
+        on:click={scanProjectFolder}
+        title="Scan the folder above recursively (depth ≤ 6) for Java projects"
+        type="button"
+      >{isScanning ? "Scanning…" : "Discover"}</button>
+    {:else}
+      <button
+        class:primary={!disabled && canSubmit}
+        disabled={disabled || !canSubmit}
+        title="Add this project to the selected workspace"
+        type="submit"
+      >Save project</button>
+    {/if}
+
+    {#if candidateSource === "folder" && candidates.length > 0}
+      <p class="muted">Found {candidates.length} project(s) (depth ≤ 6).</p>
+      <div class="stack candidate-list">
+        {#each candidates as candidate}
+          <label class="checkbox-row" title={candidate.projectPath}>
+            <input
+              checked={selectedPaths.includes(candidate.projectPath)}
+              disabled={disabled || isImporting}
+              on:change={() => toggleCandidate(candidate.projectPath)}
+              title="Include this project in the import"
+              type="checkbox"
+            />
+            <span>{candidate.name} ({candidate.kind}) - {candidate.projectPath}</span>
+          </label>
+        {/each}
+      </div>
+      <button
+        class:primary={canImportSelected}
+        disabled={!canImportSelected}
+        on:click={importSelected}
+        title={`Add ${selectedPaths.length} project(s) to ${activeWorkspaceName || "the selected workspace"}`}
+        type="button"
+      >
+        Import selected ({selectedPaths.length})
+      </button>
+    {/if}
+
+    {#if scanMessage}
+      <p class="muted">{scanMessage}</p>
+    {/if}
   </section>
 
   <hr class="section-divider" />
@@ -264,7 +415,7 @@
       Discover
     </button>
 
-    {#if candidates.length > 0}
+    {#if candidateSource === "workspace" && candidates.length > 0}
       <div class="stack candidate-list">
         {#each candidates as candidate}
           <label class="checkbox-row" title={candidate.projectPath}>

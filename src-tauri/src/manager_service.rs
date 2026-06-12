@@ -83,7 +83,15 @@ pub struct RenameProjectInput {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceImportInput {
+    /// `.code-workspace` source (the original import flow). Ignored when
+    /// `scan_folder` is set.
+    #[serde(default)]
     pub workspace_file: String,
+    /// Sprint 16: autoscan source — re-scan this folder server-side and
+    /// import the selected candidates from it. Takes precedence over
+    /// `workspace_file` when non-empty.
+    #[serde(default)]
+    pub scan_folder: String,
     pub selected_paths: Vec<String>,
     /// Sprint 10 v0.10.4: target workspace for the imported projects.
     /// Empty/missing → "workspace-default".
@@ -975,7 +983,13 @@ impl ManagerService {
         &self,
         input: WorkspaceImportInput,
     ) -> Result<WorkspaceImportResult, String> {
-        let candidates = self.discover_workspace_projects(&input.workspace_file)?;
+        // Sprint 16: both flows re-discover server-side and intersect with
+        // the selection — client-supplied paths are never trusted directly.
+        let candidates = if !input.scan_folder.trim().is_empty() {
+            scan_folder_for_projects_at(&input.scan_folder)?
+        } else {
+            self.discover_workspace_projects(&input.workspace_file)?
+        };
         let selected: HashSet<String> = input.selected_paths.into_iter().collect();
         let target_workspace = input.workspace_name.clone();
         let mut added = Vec::new();

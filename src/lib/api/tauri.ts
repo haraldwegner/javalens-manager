@@ -275,7 +275,11 @@ export interface WorkspaceProjectCandidate {
 
 /** Input for importing projects from a workspace. */
 export interface WorkspaceImportInput {
+  /** `.code-workspace` source. Ignored when scanFolder is set. */
   workspaceFile: string;
+  /** Sprint 16: autoscan source — the backend re-scans this folder and
+   * imports the selected candidates from it. Takes precedence. */
+  scanFolder?: string;
   selectedPaths: string[];
   /** Sprint 10 v0.10.4: target workspace for the imported projects.
    * Empty/missing → "workspace-default". */
@@ -351,6 +355,12 @@ export function deleteAllProjects(): Promise<ManagerDashboard> {
 /** Discovers project candidates within a workspace file. */
 export function discoverWorkspaceProjects(workspaceFile: string): Promise<WorkspaceProjectCandidate[]> {
   return invoke("discover_workspace_projects", { workspaceFile });
+}
+
+/** Sprint 16: autoscan — recursively scan a folder (depth ≤ 6) for Java
+ * projects, no `.code-workspace` seed needed. */
+export function scanFolderForProjects(folder: string): Promise<WorkspaceProjectCandidate[]> {
+  return invoke("scan_folder_for_projects", { folder });
 }
 
 /** Imports selected projects from a workspace. */
