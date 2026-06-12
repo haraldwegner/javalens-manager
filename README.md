@@ -88,6 +88,24 @@ xattr -d com.apple.quarantine /Applications/javalens-manager.app
 
 Alternatively: right-click the `.app` in Finder → **Open** the first time. macOS remembers the choice for subsequent launches.
 
+### Windows
+
+**Windows x64 and Windows ARM64** (since v0.16.0). Each release ships two installer styles per architecture — pick either:
+
+- `javalens-manager_<version>_x64_en-US.msi` / `..._arm64_en-US.msi` — WiX MSI installer.
+- `javalens-manager_<version>_x64-setup.exe` / `..._arm64-setup.exe` — NSIS setup wizard.
+
+Download from the [latest release page](https://github.com/haraldwegner/javalens-manager/releases/latest) and double-click. Tauri's installer pulls in the WebView2 runtime automatically if it's missing (preinstalled on Windows 11).
+
+#### SmartScreen bypass (one-time)
+
+The Windows builds are unsigned (code-signing certificate is a separate later track — same situation as the macOS Gatekeeper note above), so the first launch of the installer triggers a **"Windows protected your PC"** SmartScreen dialog:
+
+1. Click **More info**.
+2. Click **Run anyway**.
+
+This is required once per downloaded installer, not per app launch.
+
 ### System tray on Linux
 
 `javalens-manager` exposes a system-tray icon for show / start / stop / quit, with per-workspace status icons from v0.12.0 onward. The tray relies on a **StatusNotifierItem / AppIndicator** host being available in your desktop environment:
