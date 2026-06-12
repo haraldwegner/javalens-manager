@@ -70,7 +70,7 @@
   let runtimeKind: "managed" | "localJar" = "managed";
   let localJarPath = "";
   let releaseRepo = "";
-  const DEFAULT_RELEASE_REPO = "hw1964/javalens-mcp";
+  const DEFAULT_RELEASE_REPO = "haraldwegner/javalens-mcp";
   const UPSTREAM_RELEASE_REPO = "pzalutski-pixel/javalens-mcp";
 
   type ReleaseRepoChoice = "default" | "upstream" | "custom";
@@ -531,7 +531,7 @@
         <p class="muted">
           Runtime source and update behavior.
           <a
-            href="https://github.com/hw1964/javalens-manager/releases"
+            href="https://github.com/haraldwegner/javalens-manager/releases"
             target="_blank"
             rel="noopener noreferrer"
             style="color: #60a5fa; text-decoration: underline; margin-left: 0.5rem;"

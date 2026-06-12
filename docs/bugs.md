@@ -1,6 +1,6 @@
 # javalens-manager — Bug Tracker
 
-Living log of issues found during real-world usage. Mirrors the fork's [`docs/bugs.md`](https://github.com/hw1964/javalens-mcp/blob/master/docs/bugs.md) format so the two repos read the same.
+Living log of issues found during real-world usage. Mirrors the fork's [`docs/bugs.md`](https://github.com/haraldwegner/javalens-mcp/blob/master/docs/bugs.md) format so the two repos read the same.
 
 Append new bugs at the **top**. Status values: `OPEN`, `IN_PROGRESS`, `FIXED in vX.Y.Z`, `WONTFIX`, `DUPLICATE`.
 
@@ -10,7 +10,7 @@ For each entry include: ID, date observed, severity, reproducer, expected vs act
 
 ## #14 — Deployed client configs go stale on workspace add (no auto-redeploy, no drift indicator) + writer silently drops unresolvable workspaces
 
-- **Status:** IN_PROGRESS — landed Stage B1 (2026-06-12): workspace mutations (add/rename/delete) auto-refresh clients that already hold managed entries (`refresh_deployed_configs`); `build_deploy_servers` returns resolve errors that ride on client results + the deploy summary. Flips to FIXED at the v0.16.0 release.
+- **Status:** FIXED in v0.16.0 — workspace mutations (add/rename/delete) auto-refresh clients that already hold managed entries (`refresh_deployed_configs`); `build_deploy_servers` returns resolve errors that ride on client results + the deploy summary.
 - **Date observed:** 2026-06-11 (live: added `javalens-mcp` workspace)
 - **Reporter:** Harald.
 - **Environment:** javalens-manager v0.15.1, fork v1.8.6, Pop!_OS 22.04.
@@ -41,7 +41,7 @@ Hook the deploy writer (or a staleness flag) into the same workspace-mutation pa
 
 ## #13 — `QuitAction::Quit` exits without stopping resident JVMs
 
-- **Status:** IN_PROGRESS — landed Stage B1 (2026-06-12); flips to FIXED at the v0.16.0 release. (Absorbed from the superseded v0.15.2 plan.)
+- **Status:** FIXED in v0.16.0 (landed Stage B1, 2026-06-12; absorbed from the superseded v0.15.2 plan).
 - **Date observed:** 2026-06-09 (lifecycle audit after v0.15.1 ship)
 - **Reporter:** Harald (audit directive); confirmed by code inspection.
 - **Environment:** javalens-manager v0.15.1, Pop!_OS 22.04.
@@ -63,7 +63,7 @@ Every quit path stops the resident JVMs the manager spawned (they are manager-ow
 
 ## #12 — `delete_workspace` / `delete_project` never release the workspace's port + token
 
-- **Status:** IN_PROGRESS — landed Stage B1 (2026-06-12); flips to FIXED at the v0.16.0 release. (Absorbed from the superseded v0.15.2 plan.)
+- **Status:** FIXED in v0.16.0 (landed Stage B1, 2026-06-12; absorbed from the superseded v0.15.2 plan).
 - **Date observed:** 2026-06-09 (lifecycle audit after v0.15.1 ship)
 - **Reporter:** Harald (audit directive); confirmed by code inspection.
 - **Environment:** javalens-manager v0.15.1.
@@ -85,7 +85,7 @@ Call `release_workspace_state` from both deletion paths; cover with `cargo test`
 
 ## #11 — `rename_workspace` orphans the old name's port/token entry and silently allocates a new port
 
-- **Status:** IN_PROGRESS — landed Stage B1 (2026-06-12); flips to FIXED at the v0.16.0 release. (Absorbed from the superseded v0.15.2 plan.)
+- **Status:** FIXED in v0.16.0 (landed Stage B1, 2026-06-12; absorbed from the superseded v0.15.2 plan).
 - **Date observed:** 2026-06-09 (lifecycle audit). Live `projects.json` count as of 2026-06-11: 7 `workspaces[]` entries for 2 real workspaces — **5 orphans**: 8802/8803/8804 from the rename chain `orb-strategies` → `ORB_strategies` → `strategies_orb` → (live) `strategies-orb`@8805, plus 8800 `JAVALENS-WS` + 8801 `JATS-ORB-WS` from deleted workspaces (bug #12's evidence). Live: 8805 + 8806.
 - **Reporter:** Harald (audit directive); confirmed in live config + code inspection.
 - **Environment:** javalens-manager v0.15.1, `~/.config/javalens-manager/projects.json`.
@@ -107,7 +107,7 @@ Rename migrates the `workspaces[]` entry key in the same transaction. One-shot m
 
 ## #10 — MCP-config writer emits one schema for all clients; Antigravity rejects it ("serverURL or command must be specified")
 
-- **Status:** IN_PROGRESS — per-client writer + validator landed Stage B0 (2026-06-12, `managed_server_entry` schema table); flips to FIXED at the v0.16.0 release. Live workaround until then: user's `~/.gemini/antigravity/mcp_config.json` hand-patched 2026-06-10 (backup `.bak-pre-serverurl`); a re-deploy from a PRE-B0 build would still revert it.
+- **Status:** FIXED in v0.16.0 (`managed_server_entry` schema table, Stage B0 2026-06-12). The 2026-06-10 hand-patch at `~/.gemini/antigravity/mcp_config.json` is superseded — v0.16.0 deploys reproduce it natively.
 - **Date observed:** 2026-06-10 (live Antigravity verification of the v0.15.1 pair)
 - **Reporter:** Harald.
 - **Environment:** javalens-manager v0.15.1, fork v1.8.6, Antigravity (daily channel), Pop!_OS 22.04.

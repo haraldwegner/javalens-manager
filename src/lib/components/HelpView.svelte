@@ -32,7 +32,7 @@
 </section>
 
 <div class="panel help-footer">
-  <a href="https://github.com/hw1964/javalens-manager/releases" target="_blank" rel="noopener noreferrer" class="muted" style="margin-right: auto; text-decoration: underline;">
+  <a href="https://github.com/haraldwegner/javalens-manager/releases" target="_blank" rel="noopener noreferrer" class="muted" style="margin-right: auto; text-decoration: underline;">
     Check for javalens-manager updates
   </a>
   <button class="primary about-button" on:click={openAboutModal} type="button">

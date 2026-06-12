@@ -11,10 +11,10 @@ Use **Dashboard** for day-to-day work, **Settings** for runtime paths and agent 
 To install or update **javalens-manager** on Linux, you can use the provided installation script. It downloads the latest `.AppImage` from GitHub Releases, verifies its checksum, and registers a desktop entry:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/hw1964/javalens-manager/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/haraldwegner/javalens-manager/main/install.sh | bash
 ```
 
-For `.deb` packages or other formats, see the [GitHub Releases page](https://github.com/hw1964/javalens-manager/releases).
+For `.deb` packages or other formats, see the [GitHub Releases page](https://github.com/haraldwegner/javalens-manager/releases).
 
 ---
 
@@ -25,7 +25,7 @@ A **workspace** is a named group of Java projects loaded into one JavaLens proce
 - **One workspace per cohesive task.** A bundle/multi-module application (e.g. an Eclipse RCP product with 12 OSGi bundles), a monorepo, or a single project that you want isolated — each gets its own workspace.
 - **Live updates.** Add or remove a project from a workspace and the running JavaLens picks it up within ~1 second through a `workspace.json` file watcher. No MCP-client restart, no agent-session reload.
 - **No ports.** Workspaces are identified by name. There is no port range, no per-project port allocation, no port conflicts.
-- **Tool budget.** Each workspace contributes ~60 tools toward the agent's tool registration cap (Antigravity caps around 100). Stick to 1–3 active workspaces concurrently.
+- **Tool budget.** Each workspace contributes ~79 tools (fork v1.9.0) toward the agent's tool registration cap (Antigravity caps around 100). With the current tool surface that means ONE active workspace per Antigravity session; Cursor and Claude Code tolerate more.
 - **Migration.** If you're upgrading from v0.10.3 or earlier, existing projects are auto-grouped into default workspaces named like `workspace-11100` (derived from the old `assignedPort`). Rename them through the Workspaces card or the workspace header.
 
 ---
@@ -58,6 +58,10 @@ Each row in the Workspaces card shows a workspace name, a colored **status lamp*
 2. **Project path** — The root directory of a Java/Maven/Gradle (or Eclipse PDE) project.
 3. **Workspace** — Implicitly the active workspace from the left card. Pick a different one in the Workspaces card to switch.
 4. **Save project** — Registers the project. The manager updates the workspace's `workspace.json` and any running JavaLens picks up the new project immediately.
+
+#### Recursive search (autoscan) — since v0.16.0
+
+Tick the **Recursive search (autoscan)** checkbox under Project path to flip the form into discovery mode: **Browse** then scans the picked folder recursively (depth ≤ 6) for Maven/Gradle and Eclipse/PDE projects and unfolds the results right in the card — tick the ones you want, **Import selected**, and they all join the active workspace. The button reads **Discover** for hand-typed paths or rescans; the Name field is disabled (each discovered project keeps its folder name). Point it at a parent folder like `~/Projects` — no `.code-workspace` file needed.
 
 ### Import VSCode Workspace
 
@@ -97,7 +101,7 @@ If the row you grab is part of an active selection, the **whole selection** move
 
 The **Agent deploy** strip contains **Deploy to Agents**, **Dry run**, **Regenerate**, and **Delete**. These actions do **not** start or stop JavaLens — they rebuild MCP entries from your workspaces and read or write **MCP client config files** on disk (see Settings → MCP Config Locations).
 
-- **Deploy to Agents** — Writes manager-owned MCP server entries (one per workspace, keyed `jl-<workspace-name>`) into the selected clients' configs, plus the rule blocks the manager maintains.
+- **Deploy to Agents** — Writes manager-owned MCP server entries (one per workspace, keyed `jl-<workspace-name>`) into the selected clients' configs, plus the rule blocks the manager maintains. Since v0.16.0 each client receives the entry shape its parser accepts: Antigravity gets `{ "serverUrl": …, "headers": … }`; Cursor / Claude Code / IntelliJ get `{ "type": "http", "url": …, "headers": … }`. Also since v0.16.0, workspace add / rename / delete automatically refresh clients you have already deployed to (never-deployed clients stay untouched), and any workspace that cannot be resolved at deploy time is reported in the result instead of being silently omitted.
 - **Dry run** — Same validation and diff output as Deploy, but no files are written.
 - **Regenerate** — Force-rewrites the manager-managed sections, even if nothing has changed since the last write. Useful after manual edits.
 - **Delete** — Removes only the manager-injected MCP servers and rule blocks from the selected clients. It does not uninstall JavaLens or remove your projects.
@@ -106,16 +110,16 @@ Each of these opens a **target picker**: check Cursor / Claude / Antigravity / I
 
 **Cursor (length limit):** Cursor rejects tools when `serverName + ":" + toolName` exceeds about **59–60** characters. The manager keeps the generated `jl-` ids short so the longest JavaLens tool names still fit. **Antigravity** instead caps the total *number* of MCP tools registered across all servers (around 100 in current builds) — that is a separate constraint, and the main reason to keep concurrent workspaces small.
 
-### Tool surface (fork v1.7.x)
+### Tool surface (fork v1.9.0)
 
-JavaLens v1.7.x registers **73 tools per workspace service** (66 in v1.4.0 → 55 after v1.5.0's parametric consolidation → 60 with v1.5.1's LTK refactorings → 62 with v1.6.0's verification tools → 73 with v1.7.0's Ring 2/3/4 expansion). Two parametric tools (`find_pattern_usages` / `find_quality_issue`) absorbed 13 narrow ones in v1.5.0 so multi-workspace setups have headroom under Antigravity's 100-tool cap.
+JavaLens v1.9.0 registers **79 tools per workspace service** (66 in v1.4.0 → 55 after v1.5.0's parametric consolidation → 60 with v1.5.1's LTK refactorings → 62 with v1.6.0's verification tools → 73 with v1.7.0's Ring 2/3/4 expansion → 75 with v1.8.0 → 79 with v1.9.0's apply/undo primitives). Two parametric tools (`find_pattern_usages` / `find_quality_issue`) absorbed 13 narrow ones in v1.5.0 so multi-workspace setups have headroom under Antigravity's 100-tool cap.
 
 - **`find_pattern_usages(kind, query)`** — type-anchored searches. `kind ∈ { annotation, instantiation, type_argument, cast, instanceof }`.
 - **`find_quality_issue(kind, ...)`** — code-quality analyses. `kind ∈ { naming, bugs, unused, large_classes, circular_deps, reflection, throws, catches }`.
 
 Each parametric tool's `kind` is a typed enum in the input schema with per-kind descriptions, so agents can discover what's available through `tools/list`. `find_method_references` and the position-anchored search tools stay as separate tools.
 
-**Refactoring (since v1.5.1)** — five JDT-LTK structural refactorings: `move_class`, `move_package`, `pull_up`, `push_down`, `encapsulate_field`. They take a position (filePath / line / column, zero-based) plus refactoring-specific arguments. v1.5.2 closeout patch made `move_class` / `move_package` / `pull_up` / `push_down` work without a prior Eclipse session's `.metadata`; `encapsulate_field`'s happy-path is still pending an upstream JDT fix.
+**Refactoring (since v1.5.1; auto-apply + undo since v1.9.0)** — five JDT-LTK structural refactorings: `move_class`, `move_package`, `pull_up`, `push_down`, `encapsulate_field`. They take a position (filePath / line / column, zero-based) plus refactoring-specific arguments. Since fork v1.9.0 EVERY refactoring tool applies its change directly and returns `{ filesModified, diff, undoChangeId }` — agents verify with `compile_workspace` and revert with `undo_refactoring` if needed; `auto_apply: false` stages a change for preview-then-commit. Detect tools carry MCP `readOnlyHint` annotations, so restricted client modes (e.g. Cursor Ask mode) can run analysis without write permissions. v1.5.2 closeout patch made `move_class` / `move_package` / `pull_up` / `push_down` work without a prior Eclipse session's `.metadata`; `encapsulate_field`'s happy-path is still pending an upstream JDT fix.
 
 **Workspace verification (since v1.6.0)** — `compile_workspace` runs `IncrementalProjectBuilder` over every loaded project and aggregates `IMarker.PROBLEM` markers (compile errors, classpath errors, manifest errors) — same path Eclipse IDE's Problems view uses, catches cascading errors that per-file `get_diagnostics` misses. `run_tests` launches JUnit 4 / 5 / TestNG via JDT-LTK's launching delegate, headless, with method/class/package scope and parsed pass/fail/skip results.
 
@@ -149,7 +153,7 @@ Settings is a **two-by-two grid**: JavaLens Runtime and Exposed Services on the 
 
 Controls how the global JavaLens binary is sourced and updated:
 
-- **Release source** — `hw1964/javalens-mcp` (recommended fork) or upstream / custom. Switching saves and downloads the latest release from the new source.
+- **Release source** — `haraldwegner/javalens-mcp` (recommended fork) or upstream / custom. Switching saves and downloads the latest release from the new source.
 - **Global JavaLens Source** — **Managed runtime** uses the binary the manager downloads and tracks; **Local JAR fallback** points at a specific `javalens.jar` on disk.
 - **Active** — Version of the managed runtime, when applicable.
 - **Update policy** — *Ask before updating* vs *Always keep latest*.
@@ -182,7 +186,7 @@ If a probe fails, fix connectivity or runtime issues before relying on **Deploy 
 
   *Why monochrome bullets?* GNOME's `gnome-shell-extension-appindicator` strips per-menu-item images at the D-Bus boundary, so the colored status disks shipped in v0.12.0 never reached the user. Monochrome unicode shapes render in the menu's own font (1× line height) and survive the appindicator pipe across every Linux desktop we ship to.
 
-  *Linux note:* the tray relies on a StatusNotifierItem / AppIndicator host. Pop!_OS, Ubuntu 22.04+, KDE / XFCE / Cinnamon / MATE work out of the box; vanilla GNOME (Fedora Workstation, Debian GNOME) needs `gnome-shell-extension-appindicator` installed once. See the [README](https://github.com/hw1964/javalens-manager#system-tray-on-linux) for distro-specific install commands.
+  *Linux note:* the tray relies on a StatusNotifierItem / AppIndicator host. Pop!_OS, Ubuntu 22.04+, KDE / XFCE / Cinnamon / MATE work out of the box; vanilla GNOME (Fedora Workstation, Debian GNOME) needs `gnome-shell-extension-appindicator` installed once. See the [README](https://github.com/haraldwegner/javalens-manager#system-tray-on-linux) for distro-specific install commands.
 - **Autostart on boot** *(v0.14.0; expanded in v0.14.1)* — Start the manager automatically at session login AND restore the workspaces that were running at last shutdown. Per-OS plumbing for the manager launch: Linux writes `~/.config/autostart/*.desktop`, macOS registers a LaunchAgent, Windows touches the registry Run key. Default is opt-in (off). Mirrored in the tray menu as a checkable item — toggling from either surface updates the other (v0.14.1 added the event-driven sync). **Session restoration semantics:** if you Quit from the tray (or close-to-tray then Quit) the running workspaces stay marked Running in the manager's snapshot, and the next launch restores them ~2 s after the UI is up. If you choose **Stop and Quit**, every workspace is cleanly stopped — next launch starts none. Workspaces that were `Failed` at shutdown count as "user wanted this running" and get retried.
 - **Diagnostics** — Read-only summary: paths for the projects store, settings file, state directory, and resolved data root. **Workspaces** and **Project count** mirror the Dashboard totals, useful when reporting issues.
 - **Clean logs** — Removes manager runtime logs (workspaces and settings stay).

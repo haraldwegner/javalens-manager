@@ -1,6 +1,14 @@
 # Sprint 16 Backlog
 
-> **Status: drafted 2026-06-07; scope expanded 2026-06-12.** Originally these two requirements were part of Sprint 15 ([`sprint-15-backlog.md`](sprint-15-backlog.md)), but Sprint 15 re-scoped to bug #8 + bug #9 PRIMARY fix end-to-end (coupled with fork [Sprint 14a](../../../javalens-mcp/docs/sprints/sprint-14a-http-sse-transport.md) → v1.8.5 HTTP/SSE default). Windows installer + scan-folder pushed here. **2026-06-12 expansion: absorbs the superseded [v0.15.2 hotfix scope](sprint-15.2-hotfix-backlog.md) — bugs #10–#14 ship here instead of a standalone patch.**
+> **Status: ✅ SHIPPED in v0.16.0 (2026-06-12).** All three requirement groups
+> delivered: Windows x64+ARM64 installers (msi+nsis, 5-platform CI matrix, dispatch
+> validation green first-try), recursive-search autoscan import (checkbox UX as decided),
+> bugs #10–#14 FIXED (per-client deploy schemas, lifecycle leak closure, orphan prune,
+> deploy auto-refresh + silent-drop surfacing). 86/86 cargo green, svelte-check clean.
+> Release notes: [`../release-notes/v0.16.0.md`](../release-notes/v0.16.0.md).
+> Live smoke deferred to post-release per Harald 2026-06-12 — findings land in v0.16.1.
+>
+> **Status (historical): drafted 2026-06-07; scope expanded 2026-06-12.** Originally these two requirements were part of Sprint 15 ([`sprint-15-backlog.md`](sprint-15-backlog.md)), but Sprint 15 re-scoped to bug #8 + bug #9 PRIMARY fix end-to-end (coupled with fork [Sprint 14a](../../../javalens-mcp/docs/sprints/sprint-14a-http-sse-transport.md) → v1.8.5 HTTP/SSE default). Windows installer + scan-folder pushed here. **2026-06-12 expansion: absorbs the superseded [v0.15.2 hotfix scope](sprint-15.2-hotfix-backlog.md) — bugs #10–#14 ship here instead of a standalone patch.**
 >
 > Targets manager **v0.16.0**. Manager-only sprint; the GOJA rebrand and fork-side architectural work proceed independently. Actionable plan: `~/.claude/plans/make-a-plan-happy-fern.md` (Phase B).
 
@@ -110,10 +118,10 @@ npm run check && npm run test:unit && (cd src-tauri && cargo test) && npx tauri 
 
 ## Definition of Done
 
-- [ ] `release.yml` Windows matrix ships `.msi` + `.exe` for both ARM + x64. Artifacts attached to the v0.16.0 GitHub Release.
-- [ ] Add Project form has a Scan folder mode. Selecting `~/Projects` (or any parent dir) shows discovered Java projects in the checkbox list; user can prune + import.
-- [ ] `docs/release-notes/v0.16.0.md` written, covering both areas.
-- [ ] README install section updated: Windows install path + SmartScreen note + Scan-folder UX mention.
-- [ ] Tag `v0.16.0` pushed; CI publishes the GitHub Release as Latest.
-- [ ] No AI-attribution boilerplate anywhere.
-- [ ] `MEMORY.md` + `project_sprint_state.md` updated to "Sprint 16 closed, v0.16.0 shipped".
+- [x] `release.yml` Windows matrix ships `.msi` + `.exe` for both ARM + x64. Artifacts attached to the v0.16.0 GitHub Release.
+- [x] Add Project form has a Scan folder mode (autoscan checkbox). Selecting `~/Projects` (or any parent dir) shows discovered Java projects in the checkbox list; user can prune + import.
+- [x] `docs/release-notes/v0.16.0.md` written, covering all three areas.
+- [x] README install section updated: Windows install path + SmartScreen note + Scan-folder UX mention; Help page de-staled (v1.9.0 tool surface, autoscan, per-client deploy).
+- [x] Tag `v0.16.0` pushed; CI publishes the GitHub Release as Latest.
+- [x] No AI-attribution boilerplate anywhere.
+- [x] `MEMORY.md` + `project_sprint_state.md` updated to "Sprint 16 closed, v0.16.0 shipped".
