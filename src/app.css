@@ -109,6 +109,9 @@ button {
   height: 100%;
   min-height: 0;
   overflow: auto;
+  /* Sprint 16.1 (bugs.md #20): isolate the scroll region's repaints so
+     WebKitGTK doesn't re-rasterise siblings on every scroll frame. */
+  contain: paint;
 }
 
 /* Sprint 10 v0.10.4: when the left dashboard column stacks multiple
@@ -120,6 +123,7 @@ button {
   grid-auto-rows: max-content;
   gap: 0.75rem;
   overflow-y: auto;
+  contain: paint;
 }
 
 .dashboard-column.dashboard-column-stack > .panel {
@@ -314,8 +318,14 @@ button {
   position: sticky;
   top: 0;
   z-index: 30;
-  background: rgba(11, 16, 32, 0.96);
-  backdrop-filter: blur(2px);
+  /* Sprint 16.1 (bugs.md #20): opaque background, no backdrop-filter.
+     On WebKitGTK (Linux webview) a blurred sticky element overlapping
+     the scroll region forces a full backdrop recomposite every frame —
+     the main cause of slow scrolling. At 0.96 alpha the blur was barely
+     visible; an opaque fill removes the per-frame cost with no real
+     visual change. (WebView2 on Windows composites this cheaply, which
+     is why Windows scrolling was already smooth.) */
+  background: rgb(11, 16, 32);
 }
 
 .dashboard-main {
@@ -423,9 +433,9 @@ button {
   padding: 0.42rem 0.65rem;
   border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 12px;
-  background: rgba(11, 16, 32, 0.96);
+  /* Sprint 16.1 (bugs.md #20): opaque, no backdrop-filter — see .hero. */
+  background: rgb(11, 16, 32);
   box-shadow: 0 -10px 26px rgba(2, 6, 23, 0.35);
-  backdrop-filter: blur(2px);
 }
 
 .settings-save-footer .save-settings-button {
@@ -731,6 +741,7 @@ button {
 .candidate-list {
   max-height: 15rem;
   overflow: auto;
+  contain: paint;
 }
 
 h1,
@@ -849,6 +860,7 @@ button:disabled {
 .list {
   max-height: 56rem;
   overflow-y: auto;
+  contain: paint;
   overflow-x: hidden;
   padding-right: 0.35rem;
 }

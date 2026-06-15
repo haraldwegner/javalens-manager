@@ -59,6 +59,15 @@
     projectPath.trim().length > 0 &&
     activeWorkspaceName.length > 0;
 
+  // Sprint 16.1 (bugs.md #19): the current path is "already scanned" when
+  // folder results are showing for exactly this path. Discover hides then;
+  // it returns if the path is edited (≠ scannedFolder) or while scanning.
+  $: currentPathScanned =
+    candidateSource === "folder" &&
+    candidates.length > 0 &&
+    projectPath.trim() === scannedFolder;
+  $: showDiscover = isScanning || !currentPathScanned;
+
   $: canScan =
     !disabled &&
     !isScanning &&
@@ -325,13 +334,20 @@
     </label>
 
     {#if autoscan}
-      <button
-        class:primary={canScan}
-        disabled={!canScan}
-        on:click={scanProjectFolder}
-        title="Scan the folder above recursively (depth ≤ 6) for Java projects"
-        type="button"
-      >{isScanning ? "Scanning…" : "Discover"}</button>
+      {#if showDiscover}
+        <!-- Sprint 16.1 (bugs.md #19): Browse auto-scans, so Discover is
+             only shown when the current path hasn't been scanned yet (a
+             hand-typed path, or one edited since the last scan). Once
+             results are showing for this path the button is redundant
+             and hides. -->
+        <button
+          class:primary={canScan}
+          disabled={!canScan}
+          on:click={scanProjectFolder}
+          title="Scan the folder above recursively (depth ≤ 6) for Java projects"
+          type="button"
+        >{isScanning ? "Scanning…" : "Discover"}</button>
+      {/if}
     {:else}
       <button
         class:primary={!disabled && canSubmit}
