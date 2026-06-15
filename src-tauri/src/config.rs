@@ -1030,9 +1030,15 @@ fn detect_default_mcp_client_paths() -> McpClientPaths {
     .filter_map(|parts| build(parts))
     .collect();
 
+    // Sprint 16.1 (bugs.md #18): Claude Code reads its global MCP servers
+    // from `~/.claude.json` (= `%USERPROFILE%\.claude.json` on Windows).
+    // `~/.claude/mcp.json` is not a real Claude Code path — it was the
+    // first candidate, so a fresh box where `.claude.json` didn't exist
+    // yet fell back to it and the entry was written where Claude never
+    // reads. `.claude.json` now leads.
     let claude_candidates: Vec<PathBuf> = [
-        [".claude", "mcp.json"].as_slice(),
         [".claude.json"].as_slice(),
+        [".claude", "mcp.json"].as_slice(),
     ]
     .iter()
     .filter_map(|parts| build(parts))

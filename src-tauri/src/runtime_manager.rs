@@ -13,6 +13,22 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// Sprint 16.1 (bugs.md #16): suppress the console window Windows allocates
+/// when a GUI app spawns `java.exe`. `CREATE_NO_WINDOW` (0x08000000) keeps
+/// the child windowless while leaving stdio pipes intact. No-op off Windows.
+pub(crate) fn spawn_without_console(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RuntimePhase {
@@ -225,6 +241,7 @@ impl RuntimeManager {
 
         let mut command = Command::new(&spec.command);
         command.args(&spec.args);
+        spawn_without_console(&mut command);
         command.stdin(Stdio::piped());
         // Sprint 15 Stage 10: pipe stdout (was direct-to-file) so the
         // capture thread can both tee to the log AND watch for the

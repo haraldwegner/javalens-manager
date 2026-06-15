@@ -1776,6 +1776,8 @@ impl ManagerService {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // Sprint 16.1 (bugs.md #16): no console window on Windows.
+        crate::runtime_manager::spawn_without_console(&mut command);
 
         let mut child = match command.spawn() {
             Ok(child) => child,
