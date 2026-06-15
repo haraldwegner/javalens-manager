@@ -8,13 +8,19 @@ Use **Dashboard** for day-to-day work, **Settings** for runtime paths and agent 
 
 ## Installation & Updates
 
-To install or update **javalens-manager** on Linux, you can use the provided installation script. It downloads the latest `.AppImage` from GitHub Releases, verifies its checksum, and registers a desktop entry:
+**Linux** — the install script downloads the latest `.AppImage` from GitHub Releases (matching your architecture, x86_64 or aarch64), verifies its checksum, and registers a desktop entry:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/haraldwegner/javalens-manager/main/install.sh | bash
 ```
 
-For `.deb` packages or other formats, see the [GitHub Releases page](https://github.com/haraldwegner/javalens-manager/releases).
+For `.deb` packages, see the [GitHub Releases page](https://github.com/haraldwegner/javalens-manager/releases).
+
+**macOS** (Apple Silicon) — download the `_aarch64.dmg`; unsigned, so clear the Gatekeeper quarantine once (`xattr -d com.apple.quarantine /Applications/javalens-manager.app`).
+
+**Windows** (x64 and ARM64, since v0.16.0) — download the `.msi` or `-setup.exe`; unsigned, so the first launch needs a one-time SmartScreen **More info → Run anyway**.
+
+Per-platform detail and the bypass steps are in the [README](https://github.com/haraldwegner/javalens-manager#installation).
 
 ---
 

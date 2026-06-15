@@ -8,6 +8,82 @@ For each entry include: ID, date observed, severity, reproducer, expected vs act
 
 ---
 
+## #21 — Help page stale: Installation section Linux-only; embedded screenshots predate v0.16.0
+
+- **Status:** PARTIAL — text FIXED in v0.16.1 (Installation now covers Linux/macOS/Windows); **screenshots still pending re-capture** from the v0.16.0 UI (no autoscan checkbox, old Settings layout).
+- **Date observed:** 2026-06-13 (post-v0.16.0 smoke, Linux).
+- **Reporter:** Harald.
+- **Severity:** LOW — cosmetic / onboarding accuracy.
+- **Notes:** `/help/*.png` are static assets baked at build; re-capturing needs the running app. Tracked for a follow-up doc pass.
+
+---
+
+## #20 — Slow vertical scrolling on Linux (WebKitGTK); smooth on Windows (WebView2)
+
+- **Status:** FIXED in v0.16.1 (CSS) — needs Linux re-smoke to confirm the gain.
+- **Date observed:** 2026-06-13 (Linux; user confirmed Windows scrolling is much faster).
+- **Reporter:** Harald.
+- **Severity:** MEDIUM — UX friction, worst with two nested scroll regions (candidate list inside the dashboard column).
+- **Root cause:** the Linux webview is WebKitGTK; Windows uses WebView2 (Chromium). Two sticky elements (`.hero`, the bulk-action bar) carried `backdrop-filter: blur(2px)` over the scroll regions, forcing a full backdrop recomposite every scroll frame on WebKitGTK. Nested scroll containers compounded the repaint cost.
+- **Fix:** dropped both `backdrop-filter`s (opaque fill — blur was invisible at 0.96 alpha); added `contain: paint` to the main + nested scroll containers to isolate repaints. Did NOT touch `WEBKIT_DISABLE_DMABUF_RENDERER=1` (some x86_64 GPU stacks still need it for the blank-webview fix; re-scoping it is a separate, riskier track).
+
+---
+
+## #19 — Redundant "Discover" button after autoscan Browse already scanned
+
+- **Status:** FIXED in v0.16.1.
+- **Date observed:** 2026-06-13 (Linux, autoscan UX).
+- **Reporter:** Harald.
+- **Severity:** LOW — UX confusion.
+- **Actual:** with the Recursive-search checkbox on, Browse auto-scans the picked folder, yet the "Discover" button stayed visible below the results doing nothing.
+- **Fix:** Discover now hides once results are showing for the current path; it reappears only if the path is edited (hand-typed / changed) or while a scan is running.
+
+---
+
+## #18 — Windows: Claude Code MCP entry written to a path Claude Code never reads
+
+- **Status:** FIXED in v0.16.1.
+- **Date observed:** 2026-06-13 (Windows first-run).
+- **Reporter:** Harald.
+- **Severity:** MEDIUM — deployed MCP server invisible to Claude Code.
+- **Root cause:** `config.rs::detect_default_mcp_client_paths` listed `~/.claude/mcp.json` as the FIRST Claude candidate and `~/.claude.json` second. On a fresh box where `~/.claude.json` didn't exist yet, the fallback wrote to the bogus first path. Claude Code reads `~/.claude.json` (= `%USERPROFILE%\.claude.json`).
+- **Fix:** `~/.claude.json` now leads the candidate list. (Claude **Desktop** is a separate target — see #17.)
+
+---
+
+## #17 — Windows: Claude Desktop config never targeted by deploy
+
+- **Status:** OPEN (targeted: v0.16.1, pending design decision — Claude Desktop config schema/transport).
+- **Date observed:** 2026-06-13 (Windows first-run; user runs both Claude Code and Claude Desktop).
+- **Reporter:** Harald.
+- **Severity:** MEDIUM — Claude Desktop cannot consume manager-deployed configs at all on Windows.
+- **Root cause:** the manager's only Claude target resolves to `~/.claude.json` (Claude Code). Claude Desktop reads `%APPDATA%\Claude\claude_desktop_config.json`, which the manager never writes. Additionally, Claude Desktop's file-based MCP support is historically stdio (`command`/`args`); HTTP/url entries may require an `mcp-remote` stdio shim rather than the `{type:"http",url}` shape Claude Code accepts.
+- **Proposed fix:** add a distinct `claude_desktop` deploy target (path + per-client `managed_server_entry` arm) — design decision on the entry shape (native http vs mcp-remote shim) is pending.
+
+---
+
+## #16 — Windows: JVM spawns a visible console window; lingers after stop, restart hangs (port still bound)
+
+- **Status:** PARTIAL — console suppression FIXED in v0.16.1; the restart-hang / port-still-bound symptom needs Windows re-smoke to confirm it was a consequence of the console process and is resolved.
+- **Date observed:** 2026-06-13 (Windows first-run).
+- **Reporter:** Harald.
+- **Severity:** HIGH — a console window pops on every workspace start; after stop it lingers, and the next start can't bind the port → workspace unusable until manual kill.
+- **Root cause:** `runtime_manager.rs` (and the probe spawn in `manager_service.rs`) spawned `java.exe` without `CREATE_NO_WINDOW`; a GUI app spawning a console subprocess on Windows gets a fresh console host, whose lifecycle held the process/port.
+- **Fix:** `spawn_without_console()` sets `CREATE_NO_WINDOW` (0x08000000) on Windows at both spawn sites (no-op elsewhere). If the port-bind-on-restart still fails after this, the follow-up is a Windows Job Object to kill the full process tree on stop.
+
+---
+
+## #15 — README version timeline out of order (v0.14.1 listed after v0.16.0)
+
+- **Status:** FIXED in v0.16.1.
+- **Date observed:** 2026-06-13 (GitHub README).
+- **Reporter:** Harald.
+- **Severity:** LOW — doc cosmetics.
+- **Actual:** the v0.14.1 entry sat after v0.16.0 (pre-existing misplacement, made obvious by the v0.16.0 insert landing next to it).
+- **Fix:** moved v0.14.1 to its chronological slot, right after v0.14.0.
+
+---
+
 ## #14 — Deployed client configs go stale on workspace add (no auto-redeploy, no drift indicator) + writer silently drops unresolvable workspaces
 
 - **Status:** FIXED in v0.16.0 — workspace mutations (add/rename/delete) auto-refresh clients that already hold managed entries (`refresh_deployed_configs`); `build_deploy_servers` returns resolve errors that ride on client results + the deploy summary.
