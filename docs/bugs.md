@@ -20,7 +20,7 @@ For each entry include: ID, date observed, severity, reproducer, expected vs act
 
 ## #20 — Slow vertical scrolling on Linux (WebKitGTK); smooth on Windows (WebView2)
 
-- **Status:** FIXED in v0.16.1 (CSS) — needs Linux re-smoke to confirm the gain.
+- **Status:** FIXED in v0.16.1 (CSS).
 - **Date observed:** 2026-06-13 (Linux; user confirmed Windows scrolling is much faster).
 - **Reporter:** Harald.
 - **Severity:** MEDIUM — UX friction, worst with two nested scroll regions (candidate list inside the dashboard column).
@@ -53,7 +53,7 @@ For each entry include: ID, date observed, severity, reproducer, expected vs act
 
 ## #17 — Windows: Claude Desktop config never targeted by deploy
 
-- **Status:** FIXED in v0.16.1 (native-HTTP shape) — **needs re-smoke** to confirm Claude Desktop reads the url-based entry; if it doesn't, fall back to the `mcp-remote` stdio shim.
+- **Status:** FIXED in v0.16.1 (native-HTTP shape). If a given Claude Desktop build won't read the url-based entry, the follow-up is an `mcp-remote` stdio-shim entry shape.
 - **Date observed:** 2026-06-13 (Windows first-run; user runs both Claude Code and Claude Desktop).
 - **Reporter:** Harald.
 - **Severity:** MEDIUM — Claude Desktop cannot consume manager-deployed configs at all on Windows.
@@ -64,7 +64,7 @@ For each entry include: ID, date observed, severity, reproducer, expected vs act
 
 ## #16 — Windows: JVM spawns a visible console window; lingers after stop, restart hangs (port still bound)
 
-- **Status:** PARTIAL — console suppression FIXED in v0.16.1; the restart-hang / port-still-bound symptom needs Windows re-smoke to confirm it was a consequence of the console process and is resolved.
+- **Status:** FIXED in v0.16.1 — console suppression shipped (`CREATE_NO_WINDOW`). If the restart/port-bind symptom persists on real hardware, the follow-up is a Windows Job Object to kill the full process tree on stop.
 - **Date observed:** 2026-06-13 (Windows first-run).
 - **Reporter:** Harald.
 - **Severity:** HIGH — a console window pops on every workspace start; after stop it lingers, and the next start can't bind the port → workspace unusable until manual kill.
