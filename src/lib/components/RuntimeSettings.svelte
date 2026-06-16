@@ -120,12 +120,14 @@
   let deployTargets: DeployTargetFlags = {
     cursor: true,
     claude: true,
+    claudeDesktop: true,
     antigravity: true,
     intellij: true
   };
   let mcpClientPaths: McpClientPaths = {
     cursor: {},
     claude: {},
+    claudeDesktop: {},
     antigravity: {},
     intellij: {}
   };
@@ -191,6 +193,7 @@
     return {
       cursor: normalizeMcpPathEntry(paths.cursor),
       claude: normalizeMcpPathEntry(paths.claude),
+      claudeDesktop: normalizeMcpPathEntry(paths.claudeDesktop),
       antigravity: normalizeMcpPathEntry(paths.antigravity),
       intellij: normalizeMcpPathEntry(paths.intellij)
     };
@@ -214,6 +217,7 @@
       deployTargets: {
         cursor: input.deployTargets.cursor,
         claude: input.deployTargets.claude,
+        claudeDesktop: input.deployTargets.claudeDesktop,
         antigravity: input.deployTargets.antigravity,
         intellij: input.deployTargets.intellij
       },
@@ -832,7 +836,8 @@
       <div class="mcp-clients-scroll">
       {#each [
         ["cursor", "Cursor"],
-        ["claude", "Claude"],
+        ["claude", "Claude Code"],
+        ["claudeDesktop", "Claude Desktop"],
         ["antigravity", "Antigravity"],
         ["intellij", "IntelliJ"]
       ] as [clientKey, clientLabel]}

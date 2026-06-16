@@ -64,6 +64,7 @@ export interface McpClientPathEntry {
 export interface McpClientPaths {
   cursor: McpClientPathEntry;
   claude: McpClientPathEntry;
+  claudeDesktop: McpClientPathEntry;
   antigravity: McpClientPathEntry;
   intellij: McpClientPathEntry;
 }
@@ -72,6 +73,7 @@ export interface McpClientPaths {
 export interface DeployTargetFlags {
   cursor: boolean;
   claude: boolean;
+  claudeDesktop: boolean;
   antigravity: boolean;
   intellij: boolean;
 }

@@ -511,7 +511,7 @@
                 }
               }}
               knownWorkspaces={knownWorkspaces}
-              deployTargetDefaults={$appStore.settings?.deployTargets ?? { cursor: true, claude: true, antigravity: true, intellij: true }}
+              deployTargetDefaults={$appStore.settings?.deployTargets ?? { cursor: true, claude: true, claudeDesktop: true, antigravity: true, intellij: true }}
               deployBusy={$appStore.deployBusy ?? false}
               deployError={$appStore.deployError}
               lastDeployResult={$appStore.lastDeployResult}

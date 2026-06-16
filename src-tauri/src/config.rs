@@ -105,8 +105,14 @@ pub struct McpClientPathEntry {
 pub struct McpClientPaths {
     #[serde(default)]
     pub cursor: McpClientPathEntry,
+    /// Claude Code (CLI) — `~/.claude.json`.
     #[serde(default)]
     pub claude: McpClientPathEntry,
+    /// Sprint 16.1 (bugs.md #17): Claude Desktop (GUI app) —
+    /// `<config-dir>/Claude/claude_desktop_config.json`. A distinct client
+    /// from Claude Code: different file, different process.
+    #[serde(default)]
+    pub claude_desktop: McpClientPathEntry,
     #[serde(default)]
     pub antigravity: McpClientPathEntry,
     #[serde(default)]
@@ -122,6 +128,8 @@ pub struct DeployTargetFlags {
     #[serde(default = "default_enabled_flag")]
     pub claude: bool,
     #[serde(default = "default_enabled_flag")]
+    pub claude_desktop: bool,
+    #[serde(default = "default_enabled_flag")]
     pub antigravity: bool,
     #[serde(default = "default_enabled_flag")]
     pub intellij: bool,
@@ -136,6 +144,7 @@ impl Default for DeployTargetFlags {
         Self {
             cursor: true,
             claude: true,
+            claude_desktop: true,
             antigravity: true,
             intellij: true,
         }
@@ -1022,6 +1031,16 @@ fn detect_default_mcp_client_paths() -> McpClientPaths {
             .map(|h| parts.iter().fold(h.clone(), |acc, part| acc.join(part)))
     };
 
+    // Sprint 16.1 (bugs.md #17): Claude Desktop stores its config under the
+    // OS config dir — `%APPDATA%` on Windows, `~/Library/Application Support`
+    // on macOS, `~/.config` on Linux — so use config_dir, not home.
+    let config_dir = dirs::config_dir();
+    let build_config = |parts: &[&str]| -> Option<PathBuf> {
+        config_dir
+            .as_ref()
+            .map(|c| parts.iter().fold(c.clone(), |acc, part| acc.join(part)))
+    };
+
     let cursor_candidates: Vec<PathBuf> = [
         [".cursor", "mcp.json"].as_slice(),
         [".config", "Cursor", "mcp.json"].as_slice(),
@@ -1042,6 +1061,12 @@ fn detect_default_mcp_client_paths() -> McpClientPaths {
     ]
     .iter()
     .filter_map(|parts| build(parts))
+    .collect();
+
+    let claude_desktop_candidates: Vec<PathBuf> = [["Claude", "claude_desktop_config.json"]
+        .as_slice()]
+    .iter()
+    .filter_map(|parts| build_config(parts))
     .collect();
 
     let antigravity_candidates: Vec<PathBuf> = [
@@ -1071,6 +1096,7 @@ fn detect_default_mcp_client_paths() -> McpClientPaths {
     McpClientPaths {
         cursor: make_entry(&cursor_candidates),
         claude: make_entry(&claude_candidates),
+        claude_desktop: make_entry(&claude_desktop_candidates),
         antigravity: make_entry(&antigravity_candidates),
         intellij: make_entry(&intellij_candidates),
     }
@@ -1081,6 +1107,7 @@ fn merge_detected_mcp_paths(paths: McpClientPaths) -> McpClientPaths {
     McpClientPaths {
         cursor: merge_mcp_path_entry(paths.cursor, defaults.cursor),
         claude: merge_mcp_path_entry(paths.claude, defaults.claude),
+        claude_desktop: merge_mcp_path_entry(paths.claude_desktop, defaults.claude_desktop),
         antigravity: merge_mcp_path_entry(paths.antigravity, defaults.antigravity),
         intellij: merge_mcp_path_entry(paths.intellij, defaults.intellij),
     }

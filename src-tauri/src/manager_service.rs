@@ -585,7 +585,7 @@ impl ManagerService {
                     .filter(|target| {
                         matches!(
                             target.as_str(),
-                            "cursor" | "claude" | "antigravity" | "intellij"
+                            "cursor" | "claude" | "claude_desktop" | "antigravity" | "intellij"
                         )
                     })
                     .collect()
@@ -2438,6 +2438,11 @@ fn deploy_targets_for_paths(
             enabled_by_settings: flags.claude,
         },
         DeployClientTarget {
+            id: "claude_desktop",
+            target_path: paths.claude_desktop.effective_path.clone(),
+            enabled_by_settings: flags.claude_desktop,
+        },
+        DeployClientTarget {
             id: "antigravity",
             target_path: paths.antigravity.effective_path.clone(),
             enabled_by_settings: flags.antigravity,
@@ -3481,6 +3486,22 @@ mod tests {
         let entry = &json["mcpServers"]["jl-ws"];
         assert_eq!(entry["disabled"], serde_json::Value::Bool(true));
         assert_eq!(entry["serverUrl"], "http://127.0.0.1:8805/mcp");
+    }
+
+    #[test]
+    fn deploy_writer_claude_desktop_gets_http_shape() {
+        // Sprint 16.1 (bugs.md #17): Claude Desktop is a native-HTTP client
+        // like Claude Code / Cursor — NOT the antigravity serverUrl shape.
+        let servers = vec![url_server("jl-ws", 8805, "tok", false)];
+        let json = build_client_mcp_json("claude_desktop", &servers);
+        let entry = &json["mcpServers"]["jl-ws"];
+        assert_eq!(entry["type"], "http");
+        assert_eq!(entry["url"], "http://127.0.0.1:8805/mcp");
+        assert!(entry.get("serverUrl").is_none());
+        assert!(
+            validate_client_config_shape("claude_desktop", &json, &servers).is_ok(),
+            "validator must accept the claude_desktop http shape"
+        );
     }
 
     #[test]

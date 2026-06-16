@@ -47,6 +47,7 @@
   export let deployTargetDefaults: DeployTargetFlags = {
     cursor: true,
     claude: true,
+    claudeDesktop: true,
     antigravity: true,
     intellij: true
   };
@@ -56,7 +57,8 @@
 
   const deployTargetOptions: Array<{ key: keyof DeployTargetFlags; label: string }> = [
     { key: "cursor", label: "Cursor" },
-    { key: "claude", label: "Claude" },
+    { key: "claude", label: "Claude Code" },
+    { key: "claudeDesktop", label: "Claude Desktop" },
     { key: "antigravity", label: "Antigravity" },
     { key: "intellij", label: "IntelliJ" }
   ];

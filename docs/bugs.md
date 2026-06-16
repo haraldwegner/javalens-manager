@@ -53,12 +53,12 @@ For each entry include: ID, date observed, severity, reproducer, expected vs act
 
 ## #17 — Windows: Claude Desktop config never targeted by deploy
 
-- **Status:** OPEN (targeted: v0.16.1, pending design decision — Claude Desktop config schema/transport).
+- **Status:** FIXED in v0.16.1 (native-HTTP shape) — **needs re-smoke** to confirm Claude Desktop reads the url-based entry; if it doesn't, fall back to the `mcp-remote` stdio shim.
 - **Date observed:** 2026-06-13 (Windows first-run; user runs both Claude Code and Claude Desktop).
 - **Reporter:** Harald.
 - **Severity:** MEDIUM — Claude Desktop cannot consume manager-deployed configs at all on Windows.
 - **Root cause:** the manager's only Claude target resolves to `~/.claude.json` (Claude Code). Claude Desktop reads `%APPDATA%\Claude\claude_desktop_config.json`, which the manager never writes. Additionally, Claude Desktop's file-based MCP support is historically stdio (`command`/`args`); HTTP/url entries may require an `mcp-remote` stdio shim rather than the `{type:"http",url}` shape Claude Code accepts.
-- **Proposed fix:** add a distinct `claude_desktop` deploy target (path + per-client `managed_server_entry` arm) — design decision on the entry shape (native http vs mcp-remote shim) is pending.
+- **Fix:** added a distinct `claude_desktop` deploy target — detected via the OS config dir (`%APPDATA%\Claude\claude_desktop_config.json` on Windows, `~/Library/Application Support/Claude/...` on macOS), deployed with the native-HTTP `{type:"http",url,headers}` shape (same as Claude Code), surfaced as its own row in Settings → MCP Config Locations and the deploy picker. If a given Claude Desktop build won't read url-based servers from the config file, the follow-up is an `mcp-remote` stdio-shim entry arm in `managed_server_entry` (needs Node/npx on the box).
 
 ---
 
