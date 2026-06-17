@@ -20,12 +20,15 @@ For each entry include: ID, date observed, severity, reproducer, expected vs act
 
 ## #20 — Slow vertical scrolling on Linux (WebKitGTK); smooth on Windows (WebView2)
 
-- **Status:** FIXED in v0.16.1 (CSS).
-- **Date observed:** 2026-06-13 (Linux; user confirmed Windows scrolling is much faster).
+- **Status:** FIXED in v0.16.2 (real fix). The v0.16.1 CSS attempt did NOT fix it — see below.
+- **Date observed:** 2026-06-13 (Linux; Windows scrolling much faster).
 - **Reporter:** Harald.
-- **Severity:** MEDIUM — UX friction, worst with two nested scroll regions (candidate list inside the dashboard column).
-- **Root cause:** the Linux webview is WebKitGTK; Windows uses WebView2 (Chromium). Two sticky elements (`.hero`, the bulk-action bar) carried `backdrop-filter: blur(2px)` over the scroll regions, forcing a full backdrop recomposite every scroll frame on WebKitGTK. Nested scroll containers compounded the repaint cost.
-- **Fix:** dropped both `backdrop-filter`s (opaque fill — blur was invisible at 0.96 alpha); added `contain: paint` to the main + nested scroll containers to isolate repaints. Did NOT touch `WEBKIT_DISABLE_DMABUF_RENDERER=1` (some x86_64 GPU stacks still need it for the blank-webview fix; re-scoping it is a separate, riskier track).
+- **Severity:** MEDIUM — UX friction across Settings/Help/dashboard.
+- **Environment:** x86_64 Pop!_OS 22.04, X11, hybrid Intel Alder Lake iGPU + NVIDIA dGPU, WebKitGTK 2.50.4.
+- **Root cause (real, isolated 2026-06-16):** the WRY/Tauri WebKitGTK webview's accelerated-compositing path is half-initialised on this hybrid Intel+NVIDIA stack — present enough to be used, broken enough to make scrolling jump. A native GTK WebKitGTK app (`yelp`) scrolls smoothly on the *same* WebKitGTK, which isolated it to the webview runtime, not our page. Matches [tauri#10566](https://github.com/tauri-apps/tauri/issues/10566).
+- **Ruled out (none were the cause):** GPU/compositor env (DMABUF on/off, Intel-vs-NVIDIA PRIME offload), `box-shadow` rasterisation, body radial-gradient + panel translucency blending, and inner-`overflow:auto`-vs-main-document scroll architecture. All tested live in `npx tauri dev`; none moved the needle.
+- **The v0.16.1 CSS changes were therefore ineffective** (`.hero`/bulk-bar `backdrop-filter` removal + `contain: paint`). Harmless, left in place; not the fix.
+- **Fix:** set `WEBKIT_DISABLE_COMPOSITING_MODE=1` (disables WebKitGTK accelerated compositing entirely → clean smooth path) in `lib.rs::run()` before webview creation, `cfg(target_os = "linux")`, overridable. Covers dev + every Linux package in one place. Confirmed smooth live. Independent of `WEBKIT_DISABLE_DMABUF_RENDERER` (the blank-webview fix), which stays as-is.
 
 ---
 

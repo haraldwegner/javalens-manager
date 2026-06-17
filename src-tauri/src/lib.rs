@@ -160,6 +160,21 @@ fn draw_coffee_glyph(rgba: &mut [u8]) {
 }
 
 pub fn run() {
+    // Sprint 16.2 (bugs.md #20): disable WebKitGTK accelerated compositing on
+    // Linux. On hybrid Intel+NVIDIA (and other partial-GPU) stacks the AC path
+    // is half-initialised in the WRY webview — present enough to be used, broken
+    // enough to make scrolling jump (a native GTK app like yelp scrolls fine on
+    // the same WebKitGTK, which is how we isolated it; see tauri#10566). Turning
+    // AC off entirely drops to a clean, consistently-smooth path. Set before the
+    // webview is created so WebKitGTK reads it at compositor init. Covers dev and
+    // every Linux package in one place (the CI bake only touches AppImage/.deb).
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none() {
+            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        }
+    }
+
     let config_store = ConfigStore::new().expect("failed to initialize config store");
     let release_manager = ReleaseManager::new().expect("failed to initialize release manager");
     let runtime_manager = RuntimeManager::new(config_store.paths());
