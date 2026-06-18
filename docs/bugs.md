@@ -10,7 +10,7 @@ For each entry include: ID, date observed, severity, reproducer, expected vs act
 
 ## #21 — Help page stale: Installation section Linux-only; embedded screenshots predate v0.16.0
 
-- **Status:** PARTIAL — text FIXED in v0.16.1 (Installation now covers Linux/macOS/Windows); **screenshots still pending re-capture** from the v0.16.0 UI (no autoscan checkbox, old Settings layout).
+- **Status:** FIXED in v0.16.2 — Installation text covers Linux/macOS/Windows (v0.16.1) and the five `public/help/*.png` screenshots were recaptured from the v0.16.2 UI (autoscan checkbox, Claude Desktop row in MCP Config Locations).
 - **Date observed:** 2026-06-13 (post-v0.16.0 smoke, Linux).
 - **Reporter:** Harald.
 - **Severity:** LOW — cosmetic / onboarding accuracy.
