@@ -2590,12 +2590,50 @@ fn validate_client_config_shape(
 }
 
 fn build_rule_block(client: &str, servers: &[ManagedDeployServer]) -> String {
+    // Sprint A0 (v0.17.0): the rule block deployed into each client's rule file
+    // (CLAUDE.md / .cursor/rules/*.mdc / AGENTS.md / …). It is the cross-client
+    // delivery vehicle for "use javalens, not grep, for Java" — the prior
+    // one-line policy was too vague to change agent behaviour. Two imperative
+    // sections: a Java→javalens routing table, then the TDD-refactor loop.
+    // Keep it tight and scannable; a long rule gets ignored. Identical text for
+    // every client (only the marker name differs) so the idempotent
+    // marker-replace in write_managed_rule_block stays simple.
     let mut lines = vec![
         format!("<!-- javalens-manager:{client}:start -->"),
-        "Policy: Prefer MCP service/tool calls before filesystem grep/find/manual refactor."
+        "## JavaLens MCP — use it for Java, before shell text tools".to_string(),
+        String::new(),
+        "These workspaces are served by JavaLens MCP (compiler-accurate, JDT-backed). For \
+         ANY Java semantic task, call the MCP tool BEFORE reaching for `grep`/`rg`/`find`/\
+         `sed`/`awk` or hand-reading `.java` files:"
             .to_string(),
-        "Use fallback filesystem/manual workflows only when MCP capability is unavailable."
+        String::new(),
+        "- Find a symbol by name → `search_symbols` (not grep)".to_string(),
+        "- Who calls / uses this → `find_references` / `find_method_references` / \
+         `get_call_hierarchy_incoming` (not grep)"
             .to_string(),
+        "- Type shape, members, hierarchy, supertypes → `analyze_type` / `get_type_members` \
+         / `get_type_hierarchy`"
+            .to_string(),
+        "- Jump to a definition → `go_to_definition`".to_string(),
+        "- Errors / does it compile → `compile_workspace` + `get_diagnostics`".to_string(),
+        "- Change code structurally → the refactoring tools (`rename_symbol`, \
+         `extract_method`, `inline_method`, `pull_up`, `change_method_signature`, …). Do \
+         NOT hand-edit a rename/move/extract."
+            .to_string(),
+        String::new(),
+        "Shell text search is a FALLBACK only — when JavaLens is unavailable, or for \
+         non-Java / non-semantic matches (build files, configs, comments, log strings)."
+            .to_string(),
+        String::new(),
+        "## Refactor in small, verified steps".to_string(),
+        String::new(),
+        "1. Confirm a green baseline (`compile_workspace`; run the relevant tests).".to_string(),
+        "2. Apply ONE refactoring via a JavaLens tool (it returns a diff + `undoChangeId`)."
+            .to_string(),
+        "3. Re-check: `compile_workspace` + run the tests again.".to_string(),
+        "4. Green → keep going. Red → `undo_refactoring` and rethink. One step at a time."
+            .to_string(),
+        String::new(),
         "Managed service ids:".to_string(),
     ];
     for server in servers {
@@ -3389,6 +3427,62 @@ mod tests {
             token: token.into(),
             disabled,
         }
+    }
+
+    // ===== Sprint A0 (v0.17.0): sharpened rule block =====
+
+    #[test]
+    fn rule_block_has_routing_table_and_tdd_loop() {
+        let servers = vec![url_server("jl-ws-a", 8800, "tok", false)];
+        let block = build_rule_block("cursor", &servers);
+
+        // Routing-table section: names the key tools + the grep-fallback rule.
+        assert!(block.contains("search_symbols"), "names search_symbols");
+        assert!(block.contains("find_references"), "names find_references");
+        assert!(block.contains("analyze_type"), "names analyze_type");
+        assert!(block.contains("rename_symbol"), "names a refactoring tool");
+        assert!(
+            block.contains("grep") && block.to_lowercase().contains("fallback"),
+            "frames shell text-search as a fallback"
+        );
+
+        // TDD-refactor loop: the verify + undo discipline.
+        assert!(block.contains("compile_workspace"), "mentions compile_workspace");
+        assert!(block.contains("undo_refactoring"), "mentions undo on red");
+
+        // Contract preserved: markers + managed-id list still render.
+        assert!(block.starts_with("<!-- javalens-manager:cursor:start -->"));
+        assert!(block.trim_end().ends_with("<!-- javalens-manager:cursor:end -->"));
+        assert!(block.contains("Managed service ids:"));
+        assert!(block.contains("- jl-ws-a"));
+    }
+
+    #[test]
+    fn rule_block_marker_name_is_per_client_but_body_is_identical() {
+        let servers = vec![url_server("jl-ws-a", 8800, "tok", false)];
+        let cursor = build_rule_block("cursor", &servers);
+        let claude = build_rule_block("claude", &servers);
+        assert!(cursor.contains("javalens-manager:cursor:start"));
+        assert!(claude.contains("javalens-manager:claude:start"));
+        // Strip the client-specific markers; the guidance body must match.
+        let strip = |s: &str, c: &str| {
+            s.replace(&format!("<!-- javalens-manager:{c}:start -->"), "")
+                .replace(&format!("<!-- javalens-manager:{c}:end -->"), "")
+        };
+        assert_eq!(strip(&cursor, "cursor"), strip(&claude, "claude"));
+    }
+
+    #[test]
+    fn rule_block_is_deterministic_idempotent() {
+        let servers = vec![
+            url_server("jl-ws-a", 8800, "tok-a", false),
+            url_server("jl-ws-b", 8801, "tok-b", false),
+        ];
+        // Same inputs → byte-identical output (so a re-deploy is a no-op write).
+        assert_eq!(
+            build_rule_block("claude", &servers),
+            build_rule_block("claude", &servers)
+        );
     }
 
     #[test]
