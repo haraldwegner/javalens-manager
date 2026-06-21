@@ -522,18 +522,32 @@ impl RuntimeManager {
         // HTTP, so the manager pins it explicitly (-port + -token). The
         // resident JVM emits its READY line on stdout which the spawn path
         // captures to flip the phase to Running.
+        let mut args: Vec<String> = Vec::new();
+
+        // Sprint 15 B5c: conditional Lombok comprehension agent. JVM options
+        // (`-javaagent`) MUST precede `-jar`, so this goes first. Only added
+        // when the project uses Lombok AND the product ships lombok.jar.
+        if let Some(agent) = crate::lombok::javaagent_arg(
+            &[std::path::PathBuf::from(&launch_request.project_path)],
+            std::path::Path::new(&reference.resolved_jar_path),
+        ) {
+            args.push(agent);
+        }
+
+        args.extend([
+            "-jar".into(),
+            reference.resolved_jar_path.clone(),
+            "-data".into(),
+            reference.workspace_dir.clone(),
+            "-port".into(),
+            reference.resident_port.to_string(),
+            "-token".into(),
+            reference.resident_token.clone(),
+        ]);
+
         CommandSpec {
             command: "java".into(),
-            args: vec![
-                "-jar".into(),
-                reference.resolved_jar_path.clone(),
-                "-data".into(),
-                reference.workspace_dir.clone(),
-                "-port".into(),
-                reference.resident_port.to_string(),
-                "-token".into(),
-                reference.resident_token.clone(),
-            ],
+            args,
             env: vec![],
             log_path,
         }
